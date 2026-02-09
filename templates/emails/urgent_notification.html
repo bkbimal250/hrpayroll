@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🚨 URGENT: {{ notification.title }}</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #fff5f5;
+        }
+        .container {
+            background-color: white;
+            padding: 0;
+            border-radius: 12px;
+            box-shadow: 0 4px 25px rgba(220, 53, 69, 0.4);
+            border: 3px solid #dc3545;
+            overflow: hidden;
+        }
+        .urgent-header {
+            background: linear-gradient(135deg, #dc3545 0%, #c82333 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+            position: relative;
+        }
+        .logo {
+            width: 60px;
+            height: 60px;
+            margin: 0 auto 20px;
+            border-radius: 50%;
+            background-color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+        }
+        .logo img {
+            width: 40px;
+            height: 40px;
+            object-fit: contain;
+        }
+        .company-name {
+            font-size: 24px;
+            font-weight: bold;
+            margin: 0 0 15px 0;
+            text-shadow: 0 2px 4px rgba(0,0,0,0.3);
+        }
+        .urgent-title {
+            font-size: 28px;
+            font-weight: bold;
+            margin: 0 0 10px 0;
+            text-shadow: 0 2px 4px rgba(0,0,0,0.3);
+        }
+        .urgent-badge {
+            display: inline-block;
+            background-color: #ffc107;
+            color: #000;
+            padding: 10px 20px;
+            border-radius: 25px;
+            font-weight: bold;
+            font-size: 14px;
+            margin: 10px 0;
+            box-shadow: 0 2px 10px rgba(255, 193, 7, 0.3);
+            animation: pulse 2s infinite;
+        }
+        @keyframes pulse {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.05); }
+            100% { transform: scale(1); }
+        }
+        .content {
+            padding: 30px;
+        }
+        .notification-title {
+            font-size: 22px;
+            font-weight: 600;
+            color: #dc3545;
+            margin: 0 0 20px 0;
+        }
+        .urgent-notice {
+            background: linear-gradient(135deg, #f8d7da 0%, #f5c6cb 100%);
+            color: #721c24;
+            padding: 20px;
+            border-radius: 8px;
+            margin: 25px 0;
+            border: 2px solid #f5c6cb;
+            font-weight: 600;
+            text-align: center;
+        }
+        .message {
+            background-color: #fff5f5;
+            padding: 25px;
+            border-radius: 8px;
+            margin: 25px 0;
+            border-left: 5px solid #dc3545;
+            font-size: 15px;
+            line-height: 1.7;
+        }
+        .action-button {
+            display: inline-block;
+            background: linear-gradient(135deg, #dc3545 0%, #c82333 100%);
+            color: white;
+            padding: 15px 30px;
+            text-decoration: none;
+            border-radius: 25px;
+            margin: 20px 0;
+            font-weight: bold;
+            font-size: 16px;
+            box-shadow: 0 4px 15px rgba(220, 53, 69, 0.4);
+            transition: all 0.3s ease;
+        }
+        .action-button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(220, 53, 69, 0.5);
+        }
+        .footer {
+            background-color: #f8f9fa;
+            padding: 25px 30px;
+            border-top: 1px solid #e9ecef;
+            font-size: 13px;
+            color: #6c757d;
+        }
+        .dashboard-link {
+            color: #dc3545;
+            text-decoration: none;
+            font-weight: 600;
+        }
+        .dashboard-link:hover {
+            text-decoration: underline;
+        }
+        .no-reply {
+            background-color: #fff3cd;
+            border: 1px solid #ffeaa7;
+            color: #856404;
+            padding: 10px;
+            border-radius: 5px;
+            margin-top: 15px;
+            font-size: 12px;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="urgent-header">
+            <div class="logo">
+                <img src="https://company.d0s369.co.in/media/documents/companylogo.png" alt="{{ company_name }} Logo" onerror="this.style.display='none'">
+            </div>
+            <h1 class="company-name">{{ company_name }}</h1>
+            <h2 class="urgent-title">🚨 URGENT NOTIFICATION 🚨</h2>
+            <div class="urgent-badge">IMMEDIATE ATTENTION REQUIRED</div>
+        </div>
+        
+        <div class="content">
+            <h3 class="notification-title">{{ notification.title }}</h3>
+            
+            <div class="urgent-notice">
+                <strong>⚠️ This is an urgent notification that requires immediate attention.</strong>
+            </div>
+            
+            <div class="message">
+                <p>{{ notification.message|linebreaks }}</p>
+                {% if approver_name %}
+                <p style="margin-top: 15px; padding: 10px; background-color: #e8f5e8; border-left: 4px solid #28a745; border-radius: 4px;">
+                    <strong>Approved by:</strong> {{ approver_name }}
+                </p>
+                {% endif %}
+            </div>
+            
+            {% if notification.action_url and notification.action_text %}
+            <div style="text-align: center;">
+                <a href="{{ notification.action_url }}" class="action-button">
+                    {{ notification.action_text }} →
+                </a>
+            </div>
+            {% endif %}
+            
+            <div class="footer">
+                <p><strong>Urgent Notification Details:</strong></p>
+                <ul>
+                    <li><strong>Type:</strong> {{ notification.notification_type|title }}</li>
+                    <li><strong>Priority:</strong> {{ notification.priority|title }}</li>
+                    <li><strong>Created:</strong> {{ notification.created_at|date:"F d, Y H:i" }}</li>
+                    {% if notification.expires_at %}
+                    <li><strong>Expires:</strong> {{ notification.expires_at|date:"F d, Y H:i" }}</li>
+                    {% endif %}
+                </ul>
+                
+                <p>
+                    <strong>This urgent notification was sent from {{ company_name }} Attendance System.</strong><br>
+                    Please take immediate action if required.<br>
+                    Visit <a href="{{ dashboard_url }}" class="dashboard-link">{{ dashboard_url }}</a> for more details.
+                </p>
+                
+                <div class="no-reply">
+                    <strong>Please do not reply to this email.</strong>
+                </div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

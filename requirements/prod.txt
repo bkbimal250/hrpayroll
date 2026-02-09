@@ -1,0 +1,25 @@
+-r base.txt
+
+# =========================
+# Production Server
+# =========================
+gunicorn==21.2.0
+
+# =========================
+# PDF Rendering (Linux only)
+# =========================
+weasyprint==60.2
+html5lib==1.1
+tinycss2==1.4.0
+cssselect2==0.8.0
+fonttools==4.60.1
+pyphen==0.17.2
+pydyf==0.11.0
+brotli==1.2.0
+zopfli==0.4.0
+webencodings==0.5.1
+cffi==2.0.0
+pycparser==2.23
+certifi==2025.11.12
+urllib3==2.5.0
+six==1.17.0

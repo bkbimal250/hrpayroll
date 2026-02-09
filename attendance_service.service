@@ -1,0 +1,30 @@
+[Unit]
+Description=Django Attendance Auto-Fetch Service
+After=network.target mysql.service
+Wants=mysql.service
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/path/to/your/django/project
+Environment=DJANGO_SETTINGS_MODULE=attendance_system.settings
+Environment=ENVIRONMENT=production
+Environment=AUTO_START_ATTENDANCE_SERVICE=true
+ExecStart=/path/to/your/venv/bin/python manage.py start_attendance_service --daemon
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=attendance-service
+
+# Security settings
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/path/to/your/django/project/logs
+
+[Install]
+WantedBy=multi-user.target

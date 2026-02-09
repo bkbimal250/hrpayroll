@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document Functionality Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .test-section {
+            background: white;
+            padding: 20px;
+            margin: 20px 0;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .test-button {
+            background: #3b82f6;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        .test-button:hover {
+            background: #2563eb;
+        }
+        .test-button:disabled {
+            background: #9ca3af;
+            cursor: not-allowed;
+        }
+        .result {
+            margin-top: 10px;
+            padding: 10px;
+            border-radius: 4px;
+        }
+        .success {
+            background: #d1fae5;
+            color: #065f46;
+            border: 1px solid #a7f3d0;
+        }
+        .error {
+            background: #fee2e2;
+            color: #991b1b;
+            border: 1px solid #fca5a5;
+        }
+        .info {
+            background: #dbeafe;
+            color: #1e40af;
+            border: 1px solid #93c5fd;
+        }
+    </style>
+</head>
+<body>
+    <h1>Document View & Download Functionality Test</h1>
+    
+    <div class="test-section">
+        <h2>Test Document Download Functionality</h2>
+        <p>This test simulates the download functionality for both uploaded and generated documents.</p>
+        
+        <h3>Test Cases:</h3>
+        <button class="test-button" onclick="testDownload('uploaded')">Test Uploaded Document Download</button>
+        <button class="test-button" onclick="testDownload('generated')">Test Generated Document Download</button>
+        <button class="test-button" onclick="testView('uploaded')">Test Uploaded Document View</button>
+        <button class="test-button" onclick="testView('generated')">Test Generated Document View</button>
+        
+        <div id="results"></div>
+    </div>
+
+    <div class="test-section">
+        <h2>API Endpoints Test</h2>
+        <p>Testing the actual API endpoints used in the DocumentDisplay component:</p>
+        
+        <h3>Generated Documents:</h3>
+        <ul>
+            <li><strong>Download:</strong> <code>https://company.d0s369.co.in/api/generated-documents/{id}/download_pdf/</code></li>
+            <li><strong>View:</strong> Same endpoint with authentication</li>
+        </ul>
+        
+        <h3>Uploaded Documents:</h3>
+        <ul>
+            <li><strong>Download:</strong> <code>https://company.d0s369.co.in/api/documents/{id}/download/</code></li>
+            <li><strong>View:</strong> Direct file URL</li>
+        </ul>
+    </div>
+
+    <div class="test-section">
+        <h2>Authentication Test</h2>
+        <p>Testing authentication token availability:</p>
+        <button class="test-button" onclick="testAuth()">Test Authentication Token</button>
+        <div id="auth-result"></div>
+    </div>
+
+    <script>
+        function logResult(message, type = 'info') {
+            const resultsDiv = document.getElementById('results');
+            const resultDiv = document.createElement('div');
+            resultDiv.className = `result ${type}`;
+            resultDiv.innerHTML = `<strong>${new Date().toLocaleTimeString()}:</strong> ${message}`;
+            resultsDiv.appendChild(resultDiv);
+        }
+
+        function testDownload(type) {
+            logResult(`Testing ${type} document download...`, 'info');
+            
+            // Simulate the download logic from DocumentDisplay.jsx
+            const mockDoc = {
+                id: 123,
+                title: `Test ${type} document`,
+                employee_name: 'John Doe'
+            };
+            
+            const token = localStorage.getItem('access_token') || localStorage.getItem('authToken');
+            
+            if (!token) {
+                logResult('❌ No authentication token found', 'error');
+                return;
+            }
+            
+            let downloadUrl;
+            if (type === 'generated') {
+                downloadUrl = `https://company.d0s369.co.in/api/generated-documents/${mockDoc.id}/download_pdf/`;
+            } else {
+                downloadUrl = `https://company.d0s369.co.in/api/documents/${mockDoc.id}/download/`;
+            }
+            
+            logResult(`✅ Download URL constructed: ${downloadUrl}`, 'success');
+            logResult(`✅ Token available: ${token.substring(0, 20)}...`, 'success');
+            
+            // Note: We don't actually make the request in this test to avoid CORS issues
+            logResult(`✅ Download functionality test completed for ${type} documents`, 'success');
+        }
+
+        function testView(type) {
+            logResult(`Testing ${type} document view...`, 'info');
+            
+            const mockDoc = {
+                id: 123,
+                title: `Test ${type} document`,
+                employee_name: 'John Doe'
+            };
+            
+            const token = localStorage.getItem('access_token') || localStorage.getItem('authToken');
+            
+            if (!token) {
+                logResult('❌ No authentication token found', 'error');
+                return;
+            }
+            
+            if (type === 'generated') {
+                const viewUrl = `https://company.d0s369.co.in/api/generated-documents/${mockDoc.id}/download_pdf/`;
+                logResult(`✅ Generated document view URL: ${viewUrl}`, 'success');
+                logResult(`✅ Will use authenticated fetch for viewing`, 'success');
+            } else {
+                const viewUrl = mockDoc.file_url || mockDoc.file || 'direct-file-url';
+                logResult(`✅ Uploaded document view URL: ${viewUrl}`, 'success');
+                logResult(`✅ Will open direct file URL`, 'success');
+            }
+            
+            logResult(`✅ View functionality test completed for ${type} documents`, 'success');
+        }
+
+        function testAuth() {
+            const authDiv = document.getElementById('auth-result');
+            
+            const accessToken = localStorage.getItem('access_token');
+            const authToken = localStorage.getItem('authToken');
+            const refreshToken = localStorage.getItem('refresh_token');
+            
+            let authStatus = '<h4>Authentication Status:</h4><ul>';
+            
+            if (accessToken) {
+                authStatus += `<li>✅ Access Token: ${accessToken.substring(0, 20)}...</li>`;
+            } else {
+                authStatus += `<li>❌ No access_token found</li>`;
+            }
+            
+            if (authToken) {
+                authStatus += `<li>✅ Auth Token: ${authToken.substring(0, 20)}...</li>`;
+            } else {
+                authStatus += `<li>❌ No authToken found</li>`;
+            }
+            
+            if (refreshToken) {
+                authStatus += `<li>✅ Refresh Token: ${refreshToken.substring(0, 20)}...</li>`;
+            } else {
+                authStatus += `<li>❌ No refresh_token found</li>`;
+            }
+            
+            authStatus += '</ul>';
+            
+            if (!accessToken && !authToken) {
+                authStatus += '<p style="color: #991b1b;">⚠️ No authentication tokens found. Please log in to the application first.</p>';
+            } else {
+                authStatus += '<p style="color: #065f46;">✅ Authentication tokens are available for testing.</p>';
+            }
+            
+            authDiv.innerHTML = authStatus;
+        }
+
+        // Run auth test on page load
+        window.onload = function() {
+            testAuth();
+        };
+    </script>
+</body>
+</html>

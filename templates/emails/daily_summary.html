@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Daily Notification Summary - {{ date|date:"F d, Y" }}</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f4f4f4;
+        }
+        .container {
+            background-color: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+        }
+        .header {
+            background-color: #007bff;
+            color: white;
+            padding: 20px;
+            border-radius: 5px;
+            text-align: center;
+            margin-bottom: 20px;
+        }
+        .summary-stats {
+            display: flex;
+            justify-content: space-around;
+            margin: 20px 0;
+            padding: 20px;
+            background-color: #f8f9fa;
+            border-radius: 5px;
+        }
+        .stat-item {
+            text-align: center;
+        }
+        .stat-number {
+            font-size: 24px;
+            font-weight: bold;
+            color: #007bff;
+        }
+        .stat-label {
+            font-size: 12px;
+            color: #6c757d;
+            text-transform: uppercase;
+        }
+        .notification-item {
+            border-left: 4px solid #dee2e6;
+            padding: 15px;
+            margin: 10px 0;
+            background-color: #f8f9fa;
+            border-radius: 0 5px 5px 0;
+        }
+        .notification-item.unread {
+            border-left-color: #007bff;
+            background-color: #e3f2fd;
+        }
+        .notification-item.urgent {
+            border-left-color: #dc3545;
+            background-color: #f8d7da;
+        }
+        .notification-item.high {
+            border-left-color: #fd7e14;
+            background-color: #fff3cd;
+        }
+        .notification-title {
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+        .notification-meta {
+            font-size: 12px;
+            color: #6c757d;
+        }
+        .footer {
+            margin-top: 30px;
+            padding-top: 20px;
+            border-top: 1px solid #dee2e6;
+            font-size: 12px;
+            color: #6c757d;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>📅 Daily Notification Summary</h1>
+            <p>{{ date|date:"l, F d, Y" }}</p>
+        </div>
+        
+        <h2>Hello {{ user.get_full_name }}!</h2>
+        <p>Here's a summary of your notifications for today:</p>
+        
+        <div class="summary-stats">
+            <div class="stat-item">
+                <div class="stat-number">{{ notifications.count }}</div>
+                <div class="stat-label">Total</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-number">{{ notifications|length|add:"-1"|add:"1" }}</div>
+                <div class="stat-label">Unread</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-number">{{ notifications|length|add:"-1"|add:"1" }}</div>
+                <div class="stat-label">Urgent</div>
+            </div>
+        </div>
+        
+        {% if notifications %}
+        <h3>Today's Notifications:</h3>
+        {% for notification in notifications %}
+        <div class="notification-item {% if not notification.is_read %}unread{% endif %} {% if notification.priority == 'urgent' %}urgent{% elif notification.priority == 'high' %}high{% endif %}">
+            <div class="notification-title">
+                {% if notification.priority == 'urgent' %}🚨{% elif notification.priority == 'high' %}⚠️{% endif %}
+                {{ notification.title }}
+            </div>
+            <div class="notification-meta">
+                {{ notification.notification_type|title }} • 
+                {{ notification.priority|title }} Priority • 
+                {{ notification.created_at|time:"H:i" }}
+                {% if not notification.is_read %}• <strong>Unread</strong>{% endif %}
+            </div>
+        </div>
+        {% endfor %}
+        {% else %}
+        <div style="text-align: center; padding: 40px; color: #6c757d;">
+            <h3>🎉 No notifications today!</h3>
+            <p>You're all caught up. Have a great day!</p>
+        </div>
+        {% endif %}
+        
+        <div class="footer">
+            <p>
+                This is your daily notification summary from {{ company_name }} Attendance System.<br>
+                <a href="{{ site_url }}">Login to view all notifications</a>
+            </p>
+        </div>
+    </div>
+</body>
+</html>

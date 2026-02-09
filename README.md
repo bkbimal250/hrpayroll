@@ -31,7 +31,7 @@ A comprehensive Django-based web application for managing employee attendance, d
 - **Framework**: Django 5.2.4
 - **API**: Django REST Framework
 - **Authentication**: JWT (Simple JWT)
-- **Database**: MySQL with connection pooling
+- **Database**: PostgreSQL with connection pooling
 - **WebSocket**: Django Channels with Redis
 - **PDF Generation**: WeasyPrint (Ubuntu optimized)
 - **Background Tasks**: Custom service with threading
@@ -42,7 +42,7 @@ A comprehensive Django-based web application for managing employee attendance, d
 - **State Management**: React hooks
 - **HTTP Client**: Axios
 - **Real-time**: WebSocket connections
-- **Note**: Frontend is deployed separately from this backend repository
+- **Note**: Frontend source is included in `frontend/` directory
 
 ### Infrastructure
 - **Web Server**: Apache2 with mod_wsgi
@@ -55,7 +55,7 @@ A comprehensive Django-based web application for managing employee attendance, d
 
 - Ubuntu 20.04+ VPS
 - Python 3.8+
-- MySQL database
+- PostgreSQL database
 - Redis server
 - Apache2 web server
 - Domain name with SSL certificate
@@ -97,6 +97,16 @@ python manage.py createsuperuser
 
 # Collect static files
 python manage.py collectstatic --noinput
+```
+
+### 5. Setup Frontend
+```bash
+cd frontend
+# Install dependencies
+npm install
+
+# Build for production
+npm run build
 ```
 
 ### 5. Configure Apache2
@@ -269,4 +279,4 @@ This system is production-ready with:
 -  Production security configurations
 -  Comprehensive deployment guides
 
-**Deploy with confidence on your Apache2 VPS!** "# hrpayroll" 
+ 

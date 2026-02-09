@@ -64,8 +64,8 @@ A comprehensive Django-based web application for managing employee attendance, d
 
 ### 1. Clone Repository
 ```bash
-git clone https://github.com/your-username/EmployeeAttandance.git
-cd EmployeeAttandance
+git clone https://github.com/bkbimal250/hrpayroll.git
+cd hrpayroll
 ```
 
 ### 2. Run Deployment Script
@@ -117,7 +117,7 @@ sudo certbot --apache -d your-domain.com -d www.your-domain.com
 ## 📁 Project Structure
 
 ```
-EmployeeAttandance/
+hrpayroll/
 ├── attendance_system/          # Django project settings
 ├── core/                       # Main Django app
 │   ├── models.py              # Database models
@@ -149,12 +149,12 @@ SECRET_KEY=your-super-secret-key
 ALLOWED_HOSTS=your-domain.com,www.your-domain.com
 
 # Database Configuration
-DB_ENGINE=django.db.backends.mysql
+DB_ENGINE=django.db.backends.postgresql
 DB_NAME=your_database_name
 DB_USER=your_database_user
 DB_PASSWORD=your_database_password
 DB_HOST=your_database_host
-DB_PORT=3306
+DB_PORT=5432
 
 # Redis Configuration
 REDIS_HOST=localhost

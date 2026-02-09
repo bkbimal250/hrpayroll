@@ -177,7 +177,7 @@ logs/
 *.log
 
 # Media files (user uploads)
-media/
+
 core/migrations/
 core/migrations/*
 

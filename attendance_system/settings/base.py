@@ -301,4 +301,4 @@ CACHES = {
 # APPLICATION-SPECIFIC SETTINGS
 # =============================================================================
 COMPANY_NAME = "Disha Online Solution"
-SITE_URL = os.environ.get('SITE_URL', 'https://company.d0s369.co.in')
+SITE_URL = os.environ.get('SITE_URL', 'https://dosapi.attendance.dishaonliesolution.workspa.in')

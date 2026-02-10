@@ -37,10 +37,10 @@ sudo netstat -tlnp | grep :8081
 ### **Step 4: Test Endpoints**
 ```bash
 # Test main website (HTTPS)
-curl https://company.d0s369.co.in/
+curl https://dosapi.attendance.dishaonliesolution.workspa.in/
 
 # Test push endpoint (HTTP on port 8081)
-curl -X POST http://company.d0s369.co.in:8081/api/device/push-attendance/ \
+curl -X POST http://dosapi.attendance.dishaonliesolution.workspa.in:8081/api/device/push-attendance/ \
   -H "Content-Type: application/json" \
   -d '{"test": "data"}'
 
@@ -70,7 +70,7 @@ DB_PORT=3306
 SECRET_KEY=your-secret-key-here
 DEBUG=False
 ENVIRONMENT=production
-ALLOWED_HOSTS=company.d0s369.co.in,www.company.d0s369.co.in,82.25.109.137,localhost,127.0.0.1
+ALLOWED_HOSTS=dosapi.attendance.dishaonliesolution.workspa.in,www.dosapi.attendance.dishaonliesolution.workspa.in,82.25.109.137,localhost,127.0.0.1
 
 # CORS Configuration
 CORS_ALLOWED_ORIGINS=https://your-frontend-domain.com,http://localhost:3000
@@ -147,13 +147,13 @@ sudo chmod -R 775 /var/www/EmployeeAttendance/logs
 
 ### **Test 1: Main Website**
 ```bash
-curl https://company.d0s369.co.in/
+curl https://dosapi.attendance.dishaonliesolution.workspa.in/
 # Should return Django application
 ```
 
 ### **Test 2: Push Endpoint**
 ```bash
-curl -X POST http://company.d0s369.co.in:8081/api/device/push-attendance/ \
+curl -X POST http://dosapi.attendance.dishaonliesolution.workspa.in:8081/api/device/push-attendance/ \
   -H "Content-Type: application/json" \
   -d '{"device_id": "test", "data": "test"}'
 # Should return JSON response
@@ -162,16 +162,16 @@ curl -X POST http://company.d0s369.co.in:8081/api/device/push-attendance/ \
 ### **Test 3: API Endpoints**
 ```bash
 # Test offices API
-curl https://company.d0s369.co.in/api/offices/
+curl https://dosapi.attendance.dishaonliesolution.workspa.in/api/offices/
 
 # Test users API
-curl https://company.d0s369.co.in/api/users/
+curl https://dosapi.attendance.dishaonliesolution.workspa.in/api/users/
 ```
 
 ### **Test 4: ZKTeco Device Configuration**
 **In your ZKTeco devices, set:**
 - **Server Mode**: ADMS
-- **Server Address**: `company.d0s369.co.in` or `82.25.109.137`
+- **Server Address**: `dosapi.attendance.dishaonliesolution.workspa.in` or `82.25.109.137`
 - **Server Port**: `8081`
 - **Enable Domain Name**: NO
 
@@ -206,8 +206,8 @@ sudo systemctl status redis-server
 
 After completing all steps:
 
- **Main Website**: `https://company.d0s369.co.in/` - Working  
- **Push Endpoint**: `http://company.d0s369.co.in:8081/api/device/push-attendance/` - Working  
+ **Main Website**: `https://dosapi.attendance.dishaonliesolution.workspa.in/` - Working  
+ **Push Endpoint**: `http://dosapi.attendance.dishaonliesolution.workspa.in:8081/api/device/push-attendance/` - Working  
  **ZKTeco Devices**: Can push data to port 8081  
  **API Endpoints**: All working via HTTPS  
  **PDF Generation**: WeasyPrint working  

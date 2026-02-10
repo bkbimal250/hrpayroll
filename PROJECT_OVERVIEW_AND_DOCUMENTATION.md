@@ -144,7 +144,7 @@ The **Employee Attendance Management System** is a comprehensive, enterprise-gra
 
 ### **Production Environment**
 - **Server**: VPS/Cloud hosting
-- **Domain**: company.d0s369.co.in
+- **Domain**: dosapi.attendance.dishaonliesolution.workspa.in
 - **SSL Certificate**: Valid HTTPS
 - **Backup Strategy**: Automated database backups
 - **Monitoring**: Service health checks

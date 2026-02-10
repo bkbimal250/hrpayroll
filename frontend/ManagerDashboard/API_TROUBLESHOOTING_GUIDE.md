@@ -98,13 +98,13 @@ await testCorsPreflight();
 ### Option 1: Environment Variable Override
 Create `.env.local` file:
 ```env
-VITE_API_BASE_URL=https://company.d0s369.co.in/api
+VITE_API_BASE_URL=https://dosapi.attendance.dishaonliesolution.workspa.in/api
 ```
 
 ### Option 2: Use HTTP instead of HTTPS
 ```javascript
 // In api.js, temporarily change to:
-const API_BASE_URL = 'http://company.d0s369.co.in/api';
+const API_BASE_URL = 'http://dosapi.attendance.dishaonliesolution.workspa.in/api';
 ```
 
 ### Option 3: Proxy Configuration (Vite)
@@ -114,7 +114,7 @@ export default defineConfig({
   server: {
     proxy: {
       '/api': {
-        target: 'https://company.d0s369.co.in',
+        target: 'https://dosapi.attendance.dishaonliesolution.workspa.in',
         changeOrigin: true,
         secure: false
       }

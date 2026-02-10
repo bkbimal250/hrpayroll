@@ -26,7 +26,7 @@ npm install
 ```
 
 ### 2. Environment Configuration
-The application is configured to use the production API at `https://company.d0s369.co.in/api`.
+The application is configured to use the production API at `https://dosapi.attendance.dishaonliesolution.workspa.in/api`.
 
 If you need to use a different API URL, you can create a `.env` file in the root directory:
 ```env

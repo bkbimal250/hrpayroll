@@ -58,7 +58,7 @@ RewriteEngine On
 
 # Handle API requests
 RewriteCond %{REQUEST_URI} ^/api/
-RewriteRule ^api/(.*)$ https://company.d0s369.co.in/api/$1 [P,L]
+RewriteRule ^api/(.*)$ https://dosapi.attendance.dishaonliesolution.workspa.in/api/$1 [P,L]
 
 # Handle SPA routing
 RewriteCond %{REQUEST_FILENAME} !-f

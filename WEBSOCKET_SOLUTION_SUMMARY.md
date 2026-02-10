@@ -3,7 +3,7 @@
 ## 🚨 **Problem Identified**
 Your frontend is showing multiple WebSocket connection failures:
 ```
-WebSocket connection to 'wss://company.d0s369.co.in/ws/attendance/' failed:
+WebSocket connection to 'wss://dosapi.attendance.dishaonliesolution.workspa.in/ws/attendance/' failed:
 ```
 
 ## **Root Cause Analysis**
@@ -58,7 +58,7 @@ sudo systemctl status redis-server
 ### **Step 4: Test WebSocket Connection**
 ```bash
 # Test WebSocket endpoint
-wscat -c wss://company.d0s369.co.in/ws/attendance/
+wscat -c wss://dosapi.attendance.dishaonliesolution.workspa.in/ws/attendance/
 ```
 
 ## 📋 **What the Setup Script Does**
@@ -130,7 +130,7 @@ python test_websocket_connection.py
 ### **Server Testing (Ubuntu VPS)**
 ```bash
 # Test WebSocket connection
-wscat -c wss://company.d0s369.co.in/ws/attendance/
+wscat -c wss://dosapi.attendance.dishaonliesolution.workspa.in/ws/attendance/
 
 # Check service logs
 sudo journalctl -u django-asgi.service -f
@@ -180,7 +180,7 @@ If you encounter issues:
 
 1. **Check service status**: `sudo systemctl status django-asgi.service`
 2. **Review logs**: `sudo journalctl -u django-asgi.service -f`
-3. **Test WebSocket**: `wscat -c wss://company.d0s369.co.in/ws/attendance/`
+3. **Test WebSocket**: `wscat -c wss://dosapi.attendance.dishaonliesolution.workspa.in/ws/attendance/`
 4. **Verify Apache2 config**: `sudo apache2ctl configtest`
 5. **Check Redis**: `redis-cli ping`
 

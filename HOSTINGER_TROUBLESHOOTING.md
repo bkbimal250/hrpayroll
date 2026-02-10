@@ -60,7 +60,7 @@ RewriteRule ^assets/ - [L]
 
 # Handle API requests - proxy to backend
 RewriteCond %{REQUEST_URI} ^/api/
-RewriteRule ^api/(.*)$ https://company.d0s369.co.in/api/$1 [P,L]
+RewriteRule ^api/(.*)$ https://dosapi.attendance.dishaonliesolution.workspa.in/api/$1 [P,L]
 
 # Handle SPA routing - redirect to index.html
 RewriteCond %{REQUEST_FILENAME} !-f

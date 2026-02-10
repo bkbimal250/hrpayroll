@@ -2,7 +2,7 @@
 
 ## 🔍 **API Base URL**
 ```
-https://company.d0s369.co.in/api
+https://dosapi.attendance.dishaonliesolution.workspa.in/api
 ```
 
 ## 🔐 **Test Credentials**

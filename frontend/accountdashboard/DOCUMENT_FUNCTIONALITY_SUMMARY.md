@@ -10,8 +10,8 @@ Updated the DocumentDisplay component in the account dashboard to implement prop
 #### Download Functionality (`handleDownload`)
 - **Authentication**: Added proper token validation using `localStorage.getItem('access_token')` or `localStorage.getItem('authToken')`
 - **API Endpoints**: 
-  - Generated documents: `https://company.d0s369.co.in/api/generated-documents/{id}/download_pdf/`
-  - Uploaded documents: `https://company.d0s369.co.in/api/documents/{id}/download/`
+  - Generated documents: `https://dosapi.attendance.dishaonliesolution.workspa.in/api/generated-documents/{id}/download_pdf/`
+  - Uploaded documents: `https://dosapi.attendance.dishaonliesolution.workspa.in/api/documents/{id}/download/`
 - **Error Handling**: Improved error handling with fallback to direct file URLs
 - **User Feedback**: Added loading indicators and toast notifications
 - **File Naming**: Proper filename handling with PDF extension for generated documents
@@ -43,10 +43,10 @@ The implementation uses the same API structure as the admin dashboard:
 
 ```javascript
 // Generated Documents
-const downloadUrl = `https://company.d0s369.co.in/api/generated-documents/${doc.id}/download_pdf/`;
+const downloadUrl = `https://dosapi.attendance.dishaonliesolution.workspa.in/api/generated-documents/${doc.id}/download_pdf/`;
 
 // Uploaded Documents  
-const downloadUrl = `https://company.d0s369.co.in/api/documents/${doc.id}/download/`;
+const downloadUrl = `https://dosapi.attendance.dishaonliesolution.workspa.in/api/documents/${doc.id}/download/`;
 ```
 
 ### 4. Authentication Handling

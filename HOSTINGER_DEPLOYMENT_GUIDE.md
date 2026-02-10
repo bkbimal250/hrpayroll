@@ -41,7 +41,7 @@ public_html/
 - Sets cache headers for better performance
 
  **API Proxy:**
-- Routes `/api/` requests to `https://company.d0s369.co.in/api/`
+- Routes `/api/` requests to `https://dosapi.attendance.dishaonliesolution.workspa.in/api/`
 - Handles CORS properly
 
  **SPA Routing:**

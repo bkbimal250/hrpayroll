@@ -427,18 +427,18 @@ Web Server: Apache2 with mod_wsgi
 Database: MySQL 8.0+
 Cache: Redis 6.0+
 SSL: Let's Encrypt Certificate
-Domain: company.d0s369.co.in
+Domain: dosapi.attendance.dishaonliesolution.workspa.in
 ```
 
 ### **Apache Configuration**
 ```apache
 <VirtualHost *:80>
-    ServerName company.d0s369.co.in
-    Redirect permanent / https://company.d0s369.co.in/
+    ServerName dosapi.attendance.dishaonliesolution.workspa.in
+    Redirect permanent / https://dosapi.attendance.dishaonliesolution.workspa.in/
 </VirtualHost>
 
 <VirtualHost *:443>
-    ServerName company.d0s369.co.in
+    ServerName dosapi.attendance.dishaonliesolution.workspa.in
     DocumentRoot /var/www/html
     
     SSLEngine on

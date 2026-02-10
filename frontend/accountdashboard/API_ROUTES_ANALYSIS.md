@@ -3,7 +3,7 @@
 ## 🔍 **API Service Configuration**
 
 ### **Base Configuration**
-- **Base URL:** `https://company.d0s369.co.in/api`
+- **Base URL:** `https://dosapi.attendance.dishaonliesolution.workspa.in/api`
 - **Timeout:** 60 seconds
 - **Content-Type:** `application/json`
 - **Authentication:** JWT Bearer Token

@@ -47,7 +47,7 @@
 **Symptoms**: API calls fail with network errors
 **Solution**:
 - Check internet connection
-- Verify server is accessible: `https://company.d0s369.co.in`
+- Verify server is accessible: `https://dosapi.attendance.dishaonliesolution.workspa.in`
 - Check if server is running
 
 ### **Issue 5: Data Structure Mismatch**
@@ -66,7 +66,7 @@ const token = localStorage.getItem('authToken');
 console.log('Token:', token ? 'Present' : 'Missing');
 
 // Test token validity
-fetch('https://company.d0s369.co.in/api/auth/profile/', {
+fetch('https://dosapi.attendance.dishaonliesolution.workspa.in/api/auth/profile/', {
   headers: { 'Authorization': `Bearer ${token}` }
 })
 .then(r => r.json())
@@ -76,7 +76,7 @@ fetch('https://company.d0s369.co.in/api/auth/profile/', {
 ### **2. API Endpoint Test**
 ```javascript
 // Test users endpoint
-fetch('https://company.d0s369.co.in/api/users/', {
+fetch('https://dosapi.attendance.dishaonliesolution.workspa.in/api/users/', {
   headers: { 'Authorization': `Bearer ${localStorage.getItem('authToken')}` }
 })
 .then(r => r.json())
@@ -143,7 +143,7 @@ console.log('Current user:', user);
 ### **Test API Connectivity**
 ```javascript
 // Test basic connectivity
-fetch('https://company.d0s369.co.in/api/auth/profile/')
+fetch('https://dosapi.attendance.dishaonliesolution.workspa.in/api/auth/profile/')
 .then(r => console.log('Status:', r.status))
 .catch(e => console.error('Error:', e));
 ```

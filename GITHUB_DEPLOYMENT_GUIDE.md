@@ -120,7 +120,7 @@ sudo ufw allow 8081/tcp
 
 ### Test health check endpoint:
 ```bash
-curl https://company.d0s369.co.in:8081/api/device/health-check/
+curl https://dosapi.attendance.dishaonliesolution.workspa.in:8081/api/device/health-check/
 ```
 
 ### Expected response:
@@ -135,7 +135,7 @@ curl https://company.d0s369.co.in:8081/api/device/health-check/
 
 ### Test push endpoint:
 ```bash
-curl -X POST https://company.d0s369.co.in:8081/api/device/push-attendance/ \
+curl -X POST https://dosapi.attendance.dishaonliesolution.workspa.in:8081/api/device/push-attendance/ \
   -H "Content-Type: application/json" \
   -d '{
     "device_id": "TEST_DEVICE_001",
@@ -238,9 +238,9 @@ Your biometric devices should be configured with:
 
 ## Endpoints Available
 
-1. **Push Attendance:** `POST https://company.d0s369.co.in:8081/api/device/push-attendance/`
-2. **Receive Attendance:** `POST https://company.d0s369.co.in:8081/api/device/receive-attendance/`
-3. **Health Check:** `GET https://company.d0s369.co.in:8081/api/device/health-check/`
+1. **Push Attendance:** `POST https://dosapi.attendance.dishaonliesolution.workspa.in:8081/api/device/push-attendance/`
+2. **Receive Attendance:** `POST https://dosapi.attendance.dishaonliesolution.workspa.in:8081/api/device/receive-attendance/`
+3. **Health Check:** `GET https://dosapi.attendance.dishaonliesolution.workspa.in:8081/api/device/health-check/`
 
 ## Next Steps
 

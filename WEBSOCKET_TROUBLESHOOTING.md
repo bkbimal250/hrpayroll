@@ -5,7 +5,7 @@
 ### Problem Description
 The frontend is showing multiple WebSocket connection failures:
 ```
-WebSocket connection to 'wss://company.d0s369.co.in/ws/attendance/' failed:
+WebSocket connection to 'wss://dosapi.attendance.dishaonliesolution.workspa.in/ws/attendance/' failed:
 ```
 
 ### Root Cause Analysis
@@ -132,7 +132,7 @@ sudo systemctl status redis-server
 ### 2. Test WebSocket Endpoint
 ```bash
 # Test WebSocket connection
-wscat -c wss://company.d0s369.co.in/ws/attendance/
+wscat -c wss://dosapi.attendance.dishaonliesolution.workspa.in/ws/attendance/
 ```
 
 ### 3. Check Logs
@@ -223,7 +223,7 @@ sudo systemctl restart redis-server
 sudo systemctl status django-asgi.service apache2 redis-server
 
 # 3. Test WebSocket
-wscat -c wss://company.d0s369.co.in/ws/attendance/
+wscat -c wss://dosapi.attendance.dishaonliesolution.workspa.in/ws/attendance/
 ```
 
 ## Expected Results

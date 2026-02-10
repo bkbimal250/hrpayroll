@@ -6,7 +6,7 @@ export default defineConfig({
   server: {
     proxy: {
       '/api': {
-        target: 'https://company.d0s369.co.in',
+        target: 'https://dosapi.attendance.dishaonliesolution.workspa.in',
         changeOrigin: true,
         secure: false, // allow self-signed certs (if any)
       },

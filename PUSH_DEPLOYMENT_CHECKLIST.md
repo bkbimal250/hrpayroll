@@ -10,7 +10,7 @@ This checklist ensures your Django attendance system is properly configured to r
 - [x] Python 3.8+ with Django 5.2.4
 - [x] MySQL database configured
 - [x] SSL certificates installed
-- [x] Domain: `company.d0s369.co.in`
+- [x] Domain: `dosapi.attendance.dishaonliesolution.workspa.in`
 
 ### 2. Device Configuration 
 - [x] Server Mode: ADMS
@@ -92,7 +92,7 @@ python manage.py collectstatic --noinput
 ### 1. Health Check Test
 ```bash
 # Test health check endpoint
-curl -X GET https://company.d0s369.co.in:8081/api/device/health-check/
+curl -X GET https://dosapi.attendance.dishaonliesolution.workspa.in:8081/api/device/health-check/
 
 # Expected response:
 {
@@ -106,7 +106,7 @@ curl -X GET https://company.d0s369.co.in:8081/api/device/health-check/
 ### 2. Push Data Test
 ```bash
 # Test push endpoint with sample data
-curl -X POST https://company.d0s369.co.in:8081/api/device/push-attendance/ \
+curl -X POST https://dosapi.attendance.dishaonliesolution.workspa.in:8081/api/device/push-attendance/ \
   -H "Content-Type: application/json" \
   -d '{
     "device_id": "TEST_DEVICE_001",
@@ -149,7 +149,7 @@ DB_PORT=3306
 
 # Security
 SECRET_KEY=your-secret-key-here
-ALLOWED_HOSTS=company.d0s369.co.in,www.company.d0s369.co.in,82.25.109.137
+ALLOWED_HOSTS=dosapi.attendance.dishaonliesolution.workspa.in,www.dosapi.attendance.dishaonliesolution.workspa.in,82.25.109.137
 
 # Redis Configuration
 REDIS_HOST=localhost
@@ -157,7 +157,7 @@ REDIS_PORT=6379
 REDIS_DB=0
 
 # CORS Configuration
-CORS_ALLOWED_ORIGINS=https://company.d0s369.co.in,http://82.25.109.137
+CORS_ALLOWED_ORIGINS=https://dosapi.attendance.dishaonliesolution.workspa.in,http://82.25.109.137
 
 # Logging
 LOG_LEVEL=INFO
@@ -208,7 +208,7 @@ Create `/etc/logrotate.d/django-push`:
 # Create health check script
 cat > /usr/local/bin/check-push-service.sh << 'EOF'
 #!/bin/bash
-response=$(curl -s -o /dev/null -w "%{http_code}" https://company.d0s369.co.in:8081/api/device/health-check/)
+response=$(curl -s -o /dev/null -w "%{http_code}" https://dosapi.attendance.dishaonliesolution.workspa.in:8081/api/device/health-check/)
 if [ "$response" != "200" ]; then
     echo "Push service is down! HTTP Code: $response"
     systemctl restart apache2

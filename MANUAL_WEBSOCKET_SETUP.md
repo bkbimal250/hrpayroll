@@ -90,7 +90,7 @@ sudo systemctl status django-asgi.service apache2
 npm install -g wscat
 
 # Test WebSocket connection
-wscat -c wss://company.d0s369.co.in/ws/attendance/
+wscat -c wss://dosapi.attendance.dishaonliesolution.workspa.in/ws/attendance/
 ```
 
 ##  **Expected Results**

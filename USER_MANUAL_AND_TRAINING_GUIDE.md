@@ -52,7 +52,7 @@ The Employee Attendance Management System is a comprehensive web-based applicati
 - **Screen Resolution**: 1024x768 minimum, 1920x1080 recommended
 
 #### **Login Process**
-1. **Navigate to the System**: Go to `https://company.d0s369.co.in`
+1. **Navigate to the System**: Go to `https://dosapi.attendance.dishaonliesolution.workspa.in`
 2. **Enter Credentials**: 
    - Username: Your employee ID or email
    - Password: Your assigned password

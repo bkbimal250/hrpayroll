@@ -6,6 +6,6 @@ export default defineConfig({
   plugins: [react()],
   server: {
     // Proxy removed since we're using production API directly
-    // The API service is configured to use https://company.d0s369.co.in/api
+    // The API service is configured to use https://dosapi.attendance.dishaonliesolution.workspa.in/api
   }
 })

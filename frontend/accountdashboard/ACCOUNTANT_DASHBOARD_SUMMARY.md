@@ -16,7 +16,7 @@ The sidebar shows only the following items as requested:
 ### **API Service (Following AdminDashboard Pattern)**
 - ✅ Uses Axios with interceptors for automatic token refresh
 - ✅ Proper error handling with retry logic
-- ✅ Production API URL: `https://company.d0s369.co.in/api`
+- ✅ Production API URL: `https://dosapi.attendance.dishaonliesolution.workspa.in/api`
 - ✅ Automatic token expiration detection and refresh
 - ✅ Comprehensive logging for debugging
 

@@ -87,7 +87,7 @@
 -  **MySQL Database Configuration**
 -  **Redis Cache Setup**
 -  **SSL Certificate Installation**
--  **Domain Configuration** (company.d0s369.co.in)
+-  **Domain Configuration** (dosapi.attendance.dishaonliesolution.workspa.in)
 
 #### **Production Services**
 -  **Django Application Deployment**
@@ -201,7 +201,7 @@
 | Ubuntu Server |  Complete | Production-ready |
 | Apache2 |  Complete | WSGI configuration |
 | SSL/TLS |  Complete | HTTPS encryption |
-| Domain |  Complete | company.d0s369.co.in |
+| Domain |  Complete | dosapi.attendance.dishaonliesolution.workspa.in |
 | Monitoring |  Complete | Health checks |
 
 ---
@@ -259,7 +259,7 @@
 ##  **DEPLOYMENT STATUS**
 
 ### **Production Environment**  **LIVE**
--  **Domain**: company.d0s369.co.in
+-  **Domain**: dosapi.attendance.dishaonliesolution.workspa.in
 -  **SSL**: Valid HTTPS certificate
 -  **Server**: Production Ubuntu server
 -  **Database**: MySQL production database

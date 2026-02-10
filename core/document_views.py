@@ -13,7 +13,8 @@ from django.conf import settings
 import logging
 from datetime import datetime, date
 from django.utils.dateparse import parse_date
-# WeasyPrint availability will be checked when needed
+# WeasyPrint availability will be checked when needed by check_weasyprint_availability()
+# Do not import at module level to avoid startup crashes if missing
 WEASYPRINT_AVAILABLE = None
 PDF_CONSTRUCTOR_ARGS = None
 
@@ -194,6 +195,15 @@ class GeneratedDocumentViewSet(viewsets.ModelViewSet):
         # If no valid PDF file, generate one on-demand (works on VPS hosting)
         if WEASYPRINT_AVAILABLE:
             try:
+                if WEASYPRINT_AVAILABLE is None:
+                    check_weasyprint_availability()
+                
+                if not WEASYPRINT_AVAILABLE:
+                     logger.error("WeasyPrint became unavailable during PDF generation request")
+                     raise Exception("WeasyPrint library is not available")
+
+                import weasyprint  # Import here to avoid NameError
+                
                 logger.info(f"Generating PDF for document {document.id}")
                 logger.info(f"Using WeasyPrint version: {weasyprint.__version__}")
                 
@@ -230,8 +240,8 @@ class GeneratedDocumentViewSet(viewsets.ModelViewSet):
                     company_name = getattr(settings, 'COMPANY_NAME', 'Your Company Name')
                     company_address = getattr(settings, 'COMPANY_ADDRESS', 'Company Address, City, State, ZIP')
                     company_phone = getattr(settings, 'COMPANY_PHONE', '+1 (555) 123-4567')
-                    company_email = getattr(settings, 'COMPANY_EMAIL', 'info@company.d0s369.co.in')
-                    company_website = getattr(settings, 'COMPANY_WEBSITE', 'https://company.d0s369.co.in')
+                    company_email = getattr(settings, 'COMPANY_EMAIL', 'info@dosapi.attendance.dishaonliesolution.workspa.in')
+                    company_website = getattr(settings, 'COMPANY_WEBSITE', 'https://dosapi.attendance.dishaonliesolution.workspa.in')
                     
                 except Exception as e:
                     logger.warning(f"Could not load company information: {e}")
@@ -518,7 +528,9 @@ class GeneratedDocumentViewSet(viewsets.ModelViewSet):
                 pdf_buffer = BytesIO()
                 
                 # Create WeasyPrint HTML object with better configuration
-                html_doc = weasyprint.HTML(string=html_content)
+                # Import HTML class locally
+                from weasyprint import HTML
+                html_doc = HTML(string=html_content)
                 
                 # Generate PDF with version-compatible settings
                 try:
@@ -609,8 +621,8 @@ class GeneratedDocumentViewSet(viewsets.ModelViewSet):
                 company_name = getattr(settings, 'COMPANY_NAME', 'DISHA ONLINE SOLUTIONS')
                 company_address = getattr(settings, 'COMPANY_ADDRESS', 'Bhumiraj Costarica, 9th Floor Office No- 907, Plot No- 1 & 2, Sector 18, Sanpada, Navi Mumbai, Maharashtra 400705')
                 company_phone = getattr(settings, 'COMPANY_PHONE', '+91 1234567890')
-                company_email = getattr(settings, 'COMPANY_EMAIL', 'info@company.d0s369.co.in')
-                company_website = getattr(settings, 'COMPANY_WEBSITE', 'https://company.d0s369.co.in')
+                company_email = getattr(settings, 'COMPANY_EMAIL', 'info@dosapi.attendance.dishaonliesolution.workspa.in')
+                company_website = getattr(settings, 'COMPANY_WEBSITE', 'https://dosapi.attendance.dishaonliesolution.workspa.in')
                 
             except Exception as e:
                 logger.warning(f"Could not load company information: {e}")
@@ -1174,12 +1186,12 @@ class DocumentGenerationViewSet(viewsets.ViewSet):
         logo_path = os.path.join(settings.MEDIA_ROOT, 'documents', 'companylogo.png')
         if os.path.exists(logo_path):
             # Use production domain
-            domain = "https://company.d0s369.co.in"
+            domain = "https://dosapi.attendance.dishaonliesolution.workspa.in"
             # Return absolute URL for the logo
             return f"{domain}{settings.MEDIA_URL}documents/companylogo.png"
         else:
             # Return a placeholder or default logo
-            domain = "https://company.d0s369.co.in"
+            domain = "https://dosapi.attendance.dishaonliesolution.workspa.in"
             return f"{domain}{settings.MEDIA_URL}documents/companylogo.png"
     
     def generate_document_content(self, employee, document_type, data):
@@ -1546,9 +1558,10 @@ class DocumentGenerationViewSet(viewsets.ViewSet):
                 # Generate PDF for other document types
                 try:
                     import weasyprint
+                    from weasyprint import HTML
                     logger.info(f"Generating PDF for document {generated_doc.id}")
                     pdf_buffer = BytesIO()
-                    weasyprint.HTML(string=content).write_pdf(pdf_buffer)
+                    HTML(string=content).write_pdf(pdf_buffer)
                     pdf_buffer.seek(0)
                     
                     # Save PDF file

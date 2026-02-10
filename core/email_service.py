@@ -69,7 +69,7 @@ class EmailNotificationService:
         context = {
             'notification': notification,
             'user': notification.user,
-            'site_url': getattr(settings, 'SITE_URL', 'https://company.d0s369.co.in'),
+            'site_url': getattr(settings, 'SITE_URL', 'https://dosapi.attendance.dishaonliesolution.workspa.in'),
             'dashboard_url': dashboard_url,
             'company_name': getattr(settings, 'COMPANY_NAME', 'Company'),
             'approver_name': approver_name,
@@ -86,7 +86,7 @@ class EmailNotificationService:
             'employee': 'https://dosemployees.dishaonlinesolution.in',
             'accountant': 'https://dosaccounts.dishaonlinesolution.in/dashboard',
         }
-        return dashboard_urls.get(user_role, 'https://company.d0s369.co.in')
+        return dashboard_urls.get(user_role, 'https://dosapi.attendance.dishaonliesolution.workspa.in')
     
     @staticmethod
     def _create_text_email(notification):
@@ -178,7 +178,7 @@ Please do not reply to this email.
         context = {
             'notification': notification,
             'user': notification.user,
-            'site_url': getattr(settings, 'SITE_URL', 'https://company.d0s369.co.in'),
+            'site_url': getattr(settings, 'SITE_URL', 'https://dosapi.attendance.dishaonliesolution.workspa.in'),
             'dashboard_url': dashboard_url,
             'company_name': getattr(settings, 'COMPANY_NAME', 'Company'),
             'approver_name': approver_name,
@@ -273,7 +273,7 @@ class EmailNotificationManager:
                 'user': user,
                 'notifications': today_notifications,
                 'date': today,
-                'site_url': getattr(settings, 'SITE_URL', 'https://company.d0s369.co.in'),
+                'site_url': getattr(settings, 'SITE_URL', 'https://dosapi.attendance.dishaonliesolution.workspa.in'),
                 'company_name': getattr(settings, 'COMPANY_NAME', 'Company'),
             }
             
@@ -322,7 +322,7 @@ class EmailNotificationManager:
                 'user': user,
                 'notifications': week_notifications,
                 'week_start': week_start,
-                'site_url': getattr(settings, 'SITE_URL', 'https://company.d0s369.co.in'),
+                'site_url': getattr(settings, 'SITE_URL', 'https://dosapi.attendance.dishaonliesolution.workspa.in'),
                 'company_name': getattr(settings, 'COMPANY_NAME', 'Company'),
             }
             

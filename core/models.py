@@ -491,7 +491,7 @@ class Attendance(models.Model):
         """Calculate attendance status based on working hours and late coming"""
         try:
             from django.utils import timezone
-            from datetime import time, datetime, date
+            from datetime import time, datetime, date, timedelta
             
             # Check if this is a future date
             today = date.today()
@@ -505,26 +505,11 @@ class Attendance(models.Model):
             
             # Get working hours settings for the user's office
             office = self.user.office
-            if not office:
-                # Default settings if no office assigned
-                start_time = time(10, 0)  # 10:00 AM
-                late_threshold_minutes = 15
-                half_day_hours = 5.0
-                late_coming_threshold = time(11, 30)  # 11:30 AM
-            else:
-                # Get office-specific settings
+            half_day_hours = 5.0  # default
+            if office:
                 settings = WorkingHoursSettings.objects.filter(office=office).first()
                 if settings:
-                    start_time = settings.start_time
-                    late_threshold_minutes = settings.late_threshold
                     half_day_hours = float(settings.half_day_threshold) / 60  # Convert minutes to hours
-                    late_coming_threshold = settings.late_coming_threshold
-                else:
-                    # Default settings
-                    start_time = time(10, 0)
-                    late_threshold_minutes = 15
-                    half_day_hours = 5.0
-                    late_coming_threshold = time(11, 30)  # 11:30 AM
             
             # Check if present (has check-in time)
             if not self.check_in_time:
@@ -534,12 +519,46 @@ class Attendance(models.Model):
                 self.late_minutes = 0
                 return
             
+            # === Determine late_coming_threshold based on shift or office settings ===
+            # Priority: 1) Employee's assigned shift  2) WorkingHoursSettings  3) Default
+            
+            shift_based = False
+            try:
+                from .models import EmployeeShiftAssignment, Shift
+                # Find the employee's active shift assignment
+                assignment = EmployeeShiftAssignment.objects.filter(
+                    employee=self.user,
+                    is_active=True,
+                    shift__is_active=True
+                ).select_related('shift').first()
+                
+                if assignment and assignment.shift:
+                    shift = assignment.shift
+                    # Late threshold = shift start_time + 1 hour
+                    shift_start_dt = datetime.combine(self.date, shift.start_time)
+                    late_threshold_dt = shift_start_dt + timedelta(hours=1)
+                    late_coming_threshold = late_threshold_dt.time()
+                    shift_based = True
+            except Exception:
+                pass  # Fall through to WorkingHoursSettings / default
+            
+            if not shift_based:
+                # Fallback to WorkingHoursSettings or default
+                if not office:
+                    late_coming_threshold = time(11, 30)  # 11:30 AM default
+                else:
+                    settings = WorkingHoursSettings.objects.filter(office=office).first()
+                    if settings:
+                        late_coming_threshold = settings.late_coming_threshold
+                    else:
+                        late_coming_threshold = time(11, 30)  # 11:30 AM default
+            
             # Check if late coming (after late_coming_threshold)
             check_in_time_only = self.check_in_time.time()
             
             if check_in_time_only > late_coming_threshold:
                 self.is_late = True
-                # Calculate minutes late from late_coming_threshold (11:30 AM), not start_time
+                # Calculate minutes late from late_coming_threshold
                 late_threshold_datetime = datetime.combine(self.date, late_coming_threshold)
                 
                 # Make both times timezone-aware for comparison

@@ -171,23 +171,66 @@ class NotificationFilter(django_filters.FilterSet):
 
 class ShiftFilter(django_filters.FilterSet):
     """FilterSet for Shift"""
-    office = django_filters.CharFilter(field_name='office__id')
+    office = django_filters.CharFilter(method='filter_office')
     shift_type = django_filters.CharFilter(field_name='shift_type')
+    is_active = django_filters.BooleanFilter(field_name='is_active')
+    search = django_filters.CharFilter(method='filter_search')
 
     class Meta:
         model = Shift
-        fields = ['office', 'shift_type']
+        fields = ['office', 'shift_type', 'is_active', 'search']
+
+    def filter_office(self, queryset, name, value):
+        if not value:
+            return queryset
+        try:
+            import uuid
+            office_uuid = uuid.UUID(value)
+            return queryset.filter(office__id=office_uuid)
+        except (ValueError, TypeError):
+            return queryset.filter(office__name__icontains=value)
+
+    def filter_search(self, queryset, name, value):
+        if not value:
+            return queryset
+        return queryset.filter(
+            Q(name__icontains=value) |
+            Q(shift_type__icontains=value) |
+            Q(office__name__icontains=value)
+        )
 
 class EmployeeShiftAssignmentFilter(django_filters.FilterSet):
     """FilterSet for EmployeeShiftAssignment"""
     employee = django_filters.CharFilter(field_name='employee__id')
     shift = django_filters.CharFilter(field_name='shift__id')
     is_active = django_filters.BooleanFilter(field_name='is_active')
-    office = django_filters.CharFilter(field_name='shift__office__id')
+    office = django_filters.CharFilter(method='filter_office')
+    search = django_filters.CharFilter(method='filter_search')
 
     class Meta:
         model = EmployeeShiftAssignment
-        fields = ['employee', 'shift', 'is_active', 'office']
+        fields = ['employee', 'shift', 'is_active', 'office', 'search']
+
+    def filter_search(self, queryset, name, value):
+        if not value:
+            return queryset
+        return queryset.filter(
+            Q(employee__first_name__icontains=value) |
+            Q(employee__last_name__icontains=value) |
+            Q(employee__employee_id__icontains=value) |
+            Q(shift__name__icontains=value)
+        )
+
+    def filter_office(self, queryset, name, value):
+        """Custom office filter to handle UUIDs"""
+        if not value:
+            return queryset
+        try:
+            import uuid
+            office_uuid = uuid.UUID(value)
+            return queryset.filter(shift__office__id=office_uuid)
+        except (ValueError, TypeError):
+            return queryset.filter(shift__office__name__icontains=value)
 
 class GeneratedDocumentFilter(django_filters.FilterSet):
     """FilterSet for GeneratedDocument"""

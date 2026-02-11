@@ -756,6 +756,9 @@ class DocumentGenerationSerializer(serializers.Serializer):
     document_type = serializers.ChoiceField(choices=DocumentTemplate.DOCUMENT_TYPE_CHOICES)
     template_id = serializers.UUIDField(required=False)
     
+    # Salary ID for auto-fetching salary data from DB (no need to send all fields)
+    salary_id = serializers.UUIDField(required=False, allow_null=True)
+    
     # Salary increment ID for auto-fetching data
     increment_id = serializers.UUIDField(required=False, allow_null=True)
     

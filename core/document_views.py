@@ -240,8 +240,8 @@ class GeneratedDocumentViewSet(viewsets.ModelViewSet):
                     company_name = getattr(settings, 'COMPANY_NAME', 'Your Company Name')
                     company_address = getattr(settings, 'COMPANY_ADDRESS', 'Company Address, City, State, ZIP')
                     company_phone = getattr(settings, 'COMPANY_PHONE', '+1 (555) 123-4567')
-                    company_email = getattr(settings, 'COMPANY_EMAIL', 'info@dosapi.attendance.dishaonliesolution.workspa.in')
-                    company_website = getattr(settings, 'COMPANY_WEBSITE', 'https://dosapi.attendance.dishaonliesolution.workspa.in')
+                    company_email = getattr(settings, 'COMPANY_EMAIL', 'conatact.dishaonliesolution@gmail.com')
+                    company_website = getattr(settings, 'COMPANY_WEBSITE', 'https://dishaonliesolution.in')
                     
                 except Exception as e:
                     logger.warning(f"Could not load company information: {e}")
@@ -1102,6 +1102,9 @@ class DocumentGenerationViewSet(viewsets.ViewSet):
         if num == 0:
             return "Zero"
         
+        if num < 0:
+            return "Minus " + self.number_to_words(abs(num))
+        
         # Indian number system: Crore, Lakh, Thousand, Hundred
         crore = num // 10000000
         lakh = (num % 10000000) // 100000
@@ -1302,58 +1305,110 @@ class DocumentGenerationViewSet(viewsets.ViewSet):
         elif document_type == 'salary_slip':
             template_content = self.get_salary_slip_template()
             
-            # Get salary slip data from frontend
-            basic_salary = float(data.get('basic_salary', 0))
-            extra_days_pay = float(data.get('extra_days_pay', 0))
-            total_gross_salary = float(data.get('total_gross_salary', 0))
-            net_salary = float(data.get('net_salary', 0))
-            total_salary = float(data.get('total_salary', 0))
+            # Check if salary_id is provided for auto-fetching from DB
+            salary_id = data.get('salary_id')
+            salary_record = None
             
-            # Get additional fields
-            total_days = data.get('total_days', 0)
-            worked_days = data.get('worked_days', 0)
-            per_day_pay = float(data.get('per_day_pay', 0))
-            gross_salary = float(data.get('gross_salary', 0))
-            absent_days = data.get('absent_days', 0)
-            total_deductions = float(data.get('total_deductions', 0))
-            final_salary = float(data.get('final_salary', 0))
-            basic_pay = float(data.get('basic_pay', 0))
+            if salary_id:
+                from .models import Salary
+                try:
+                    salary_record = Salary.objects.select_related(
+                        'employee', 'employee__office', 'employee__department', 'employee__designation'
+                    ).get(id=salary_id)
+                    logger.info(f"Auto-fetched salary record by ID: {salary_record.id}")
+                except Salary.DoesNotExist:
+                    logger.warning(f"Salary record not found for ID: {salary_id}, falling back to manual data")
             
-            # Format salary month and year
-            salary_month = data.get('salary_month', '')
-            salary_year = data.get('salary_year', '')
-            
-            # Get employee details from data or fallback to employee object
-            # Handle different field name variations from frontend
-            employee_name = (data.get('employee_name') or 
-                           data.get('full_name') or 
-                           employee.get_full_name())
-            employee_id_display = (data.get('employee_id_number') or 
-                                  data.get('employee_employee_id') or 
-                                  data.get('employee_id') or 
-                                  employee.employee_id if employee.employee_id else str(employee.id)[:8].upper())
-            employee_designation = (data.get('employee_designation') or 
-                                  data.get('designation') or 
-                                  employee.designation or 'Not specified')
-            employee_department = (data.get('employee_department') or 
-                                 data.get('department') or 
-                                 str(getattr(employee, 'department', 'Not specified')))
-            office_name = (data.get('employee_office') or 
-                         data.get('office_name') or 
-                         getattr(employee.office, 'name', 'Not specified') if hasattr(employee, 'office') and employee.office else 'Not specified')
-            
-            # Get bank details from data or employee object
-            bank_name = data.get('bank_name', getattr(employee, 'bank_name', 'Not specified'))
-            account_number = data.get('account_number', getattr(employee, 'account_number', 'Not specified'))
-            ifsc_code = data.get('ifsc_code', getattr(employee, 'ifsc_code', 'Not specified'))
-            
-            # Get other employee details
-            address = data.get('address', getattr(employee, 'address', 'Not specified'))
-            pan_number = data.get('pan_number', getattr(employee, 'pan_number', 'Not specified'))
-            aadhar_number = data.get('aadhar_number', getattr(employee, 'aadhar_number', 'Not specified'))
-            uan_number = data.get('uan_number', getattr(employee, 'uan_number', 'Not specified'))
-            esi_number = data.get('esi_number', getattr(employee, 'esi_number', 'Not specified'))
-            pf_number = data.get('pf_number', getattr(employee, 'pf_number', 'Not specified'))
+            if salary_record:
+                # === AUTO-FETCH from database (fast path) ===
+                emp = salary_record.employee
+                basic_salary = float(salary_record.basic_pay or 0)
+                per_day_pay = float(salary_record.per_day_pay or 0)
+                worked_days = float(salary_record.worked_days or 0)
+                total_days = salary_record.total_days or 30
+                gross_salary = float(salary_record.gross_salary or 0)
+                net_salary = float(salary_record.net_salary or 0)
+                total_gross_salary = gross_salary
+                total_salary = net_salary
+                extra_days_pay = max(0, (worked_days - total_days)) * per_day_pay
+                absent_days = total_days - int(worked_days)
+                total_deductions = float(salary_record.deduction or 0) + float(salary_record.balance_loan or 0)
+                final_salary = float(salary_record.final_salary or 0)
+                basic_pay = basic_salary
+                
+                # Format month/year from salary_month date
+                months = ['January', 'February', 'March', 'April', 'May', 'June',
+                          'July', 'August', 'September', 'October', 'November', 'December']
+                salary_month = months[salary_record.salary_month.month - 1]
+                salary_year = str(salary_record.salary_month.year)
+                
+                # Employee details from DB
+                employee_name = emp.get_full_name()
+                employee_id_display = emp.employee_id if emp.employee_id else str(emp.id)[:8].upper()
+                employee_designation = getattr(emp.designation, 'name', 'Not specified') if emp.designation else 'Not specified'
+                employee_department = getattr(emp.department, 'name', 'Not specified') if emp.department else 'Not specified'
+                office_name = getattr(emp.office, 'name', 'Not specified') if emp.office else 'Not specified'
+                
+                # Bank details from employee
+                bank_name = getattr(emp, 'bank_name', 'Not specified') or 'Not specified'
+                account_number = getattr(emp, 'account_number', 'Not specified') or 'Not specified'
+                ifsc_code = getattr(emp, 'ifsc_code', 'Not specified') or 'Not specified'
+                
+                # Other employee details
+                address = getattr(emp, 'address', 'Not specified') or 'Not specified'
+                pan_number = getattr(emp, 'pan_number', 'Not specified') or 'Not specified'
+                aadhar_number = getattr(emp, 'aadhar_number', 'Not specified') or 'Not specified'
+                uan_number = getattr(emp, 'uan_number', 'Not specified') or 'Not specified'
+                esi_number = getattr(emp, 'esi_number', 'Not specified') or 'Not specified'
+                pf_number = getattr(emp, 'pf_number', 'Not specified') or 'Not specified'
+                
+            else:
+                # === FALLBACK: Get salary slip data from frontend (legacy path) ===
+                basic_salary = float(data.get('basic_salary', 0))
+                extra_days_pay = float(data.get('extra_days_pay', 0))
+                total_gross_salary = float(data.get('total_gross_salary', 0))
+                net_salary = float(data.get('net_salary', 0))
+                total_salary = float(data.get('total_salary', 0))
+                
+                total_days = data.get('total_days', 0)
+                worked_days = data.get('worked_days', 0)
+                per_day_pay = float(data.get('per_day_pay', 0))
+                gross_salary = float(data.get('gross_salary', 0))
+                absent_days = data.get('absent_days', 0)
+                total_deductions = float(data.get('total_deductions', 0))
+                final_salary = float(data.get('final_salary', 0))
+                basic_pay = float(data.get('basic_pay', 0))
+                
+                salary_month = data.get('salary_month', '')
+                salary_year = data.get('salary_year', '')
+                
+                employee_name = (data.get('employee_name') or 
+                               data.get('full_name') or 
+                               employee.get_full_name())
+                employee_id_display = (data.get('employee_id_number') or 
+                                      data.get('employee_employee_id') or 
+                                      data.get('employee_id') or 
+                                      employee.employee_id if employee.employee_id else str(employee.id)[:8].upper())
+                employee_designation = (data.get('employee_designation') or 
+                                      data.get('designation') or 
+                                      employee.designation or 'Not specified')
+                employee_department = (data.get('employee_department') or 
+                                     data.get('department') or 
+                                     str(getattr(employee, 'department', 'Not specified')))
+                office_name = (data.get('employee_office') or 
+                             data.get('office_name') or 
+                             getattr(employee.office, 'name', 'Not specified') if hasattr(employee, 'office') and employee.office else 'Not specified')
+                
+                bank_name = data.get('bank_name', getattr(employee, 'bank_name', 'Not specified'))
+                account_number = data.get('account_number', getattr(employee, 'account_number', 'Not specified'))
+                ifsc_code = data.get('ifsc_code', getattr(employee, 'ifsc_code', 'Not specified'))
+                
+                address = data.get('address', getattr(employee, 'address', 'Not specified'))
+                pan_number = data.get('pan_number', getattr(employee, 'pan_number', 'Not specified'))
+                aadhar_number = data.get('aadhar_number', getattr(employee, 'aadhar_number', 'Not specified'))
+                uan_number = data.get('uan_number', getattr(employee, 'uan_number', 'Not specified'))
+                esi_number = data.get('esi_number', getattr(employee, 'esi_number', 'Not specified'))
+                pf_number = data.get('pf_number', getattr(employee, 'pf_number', 'Not specified'))
             
             
             context = {
@@ -1363,7 +1418,7 @@ class DocumentGenerationViewSet(viewsets.ViewSet):
                 'employee_department': employee_department,
                 'office_name': office_name,
                 'bank_name': bank_name,
-                'account_number': account_number,
+                'account_number': ('X' * (len(str(account_number)) - 4) + str(account_number)[-4:]) if account_number and str(account_number) not in ['Not specified', ''] and len(str(account_number)) > 4 else account_number,
                 'ifsc_code': ifsc_code,
                 'address': address,
                 'pan_number': pan_number,
@@ -1388,7 +1443,7 @@ class DocumentGenerationViewSet(viewsets.ViewSet):
                 'absent_days': absent_days,
                 'logo_url': self.get_logo_url(),
                 'current_date': datetime.now().strftime('%d/%m/%Y'),
-                'joining_date': employee.joining_date.strftime('%d-%m-%Y') if employee.joining_date else None,
+                'joining_date': (emp if salary_record else employee).joining_date.strftime('%d-%m-%Y') if (emp if salary_record else employee).joining_date else None,
             }
         
         else:

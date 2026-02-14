@@ -41,11 +41,16 @@ from .models import (
 class OfficeSerializer(serializers.ModelSerializer):
     """Serializer for Office model"""
     managers_data = serializers.SerializerMethodField(read_only=True)
+    total_staff = serializers.SerializerMethodField(read_only=True)
     
     class Meta:
         model = Office
         fields = '__all__'
         read_only_fields = ('id', 'created_at', 'updated_at')
+
+    def get_total_staff(self, obj):
+        """Get total number of staff in this office"""
+        return obj.customuser_set.count()
 
     def get_managers_data(self, obj):
         """Get detailed information about managers"""

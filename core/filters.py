@@ -60,7 +60,7 @@ class CustomUserFilter(django_filters.FilterSet):
             Q(last_name__icontains=value) |
             Q(email__icontains=value) |
             Q(employee_id__icontains=value) |
-            Q(phone_number__icontains=value)
+            Q(phone__icontains=value)
         )
 
 class DeviceUserFilter(django_filters.FilterSet):

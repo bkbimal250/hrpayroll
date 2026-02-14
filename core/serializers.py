@@ -1444,6 +1444,9 @@ class EmployeeShiftAssignmentSerializer(serializers.ModelSerializer):
     employee_name = serializers.CharField(source='employee.get_full_name', read_only=True)
     shift_name = serializers.CharField(source='shift.name', read_only=True)
     office_name = serializers.CharField(source='shift.office.name', read_only=True)
+    office_id = serializers.UUIDField(source='shift.office.id', read_only=True)
+    shift_start_time = serializers.TimeField(source='shift.start_time', read_only=True)
+    shift_end_time = serializers.TimeField(source='shift.end_time', read_only=True)
     
     class Meta:
         model = EmployeeShiftAssignment

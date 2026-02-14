@@ -4326,7 +4326,7 @@ class EmployeeShiftAssignmentViewSet(viewsets.ModelViewSet):
     
     def list(self, request, *args, **kwargs):
         """Override list method to ensure all assignments are returned"""
-        queryset = self.get_queryset()
+        queryset = self.filter_queryset(self.get_queryset())
         logger.info(f"EmployeeShiftAssignmentViewSet.list - Final queryset count: {queryset.count()}")
         
         serializer = self.get_serializer(queryset, many=True)

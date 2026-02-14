@@ -44,7 +44,21 @@ class SalaryIncrementViewSet(viewsets.ModelViewSet):
     ordering_fields = ['effective_from', 'created_at', 'increment_amount']
 
     def get_queryset(self):
-        return super().get_queryset()
+        queryset = super().get_queryset()
+        user = self.request.user
+
+        # Superuser and Admin can see all
+        if user.is_superuser or getattr(user, 'role', None) == 'admin':
+            return queryset
+
+        # Manager can only see their office
+        if getattr(user, 'role', None) == 'manager':
+            if user.office:
+                return queryset.filter(employee__office=user.office)
+            return queryset.none()  # Manager without office sees nothing
+
+        # Regular employees can only see their own history (if they benefit from this view)
+        return queryset.filter(employee=user)
 
     def perform_create(self, serializer):
         """
@@ -137,7 +151,21 @@ class SalaryIncrementHistoryViewSet(viewsets.ReadOnlyModelViewSet):
     ordering_fields = ['changed_at']
 
     def get_queryset(self):
-        return super().get_queryset()
+        queryset = super().get_queryset()
+        user = self.request.user
+
+        # Superuser and Admin can see all
+        if user.is_superuser or getattr(user, 'role', None) == 'admin':
+            return queryset
+
+        # Manager can only see their office
+        if getattr(user, 'role', None) == 'manager':
+            if user.office:
+                return queryset.filter(employee__office=user.office)
+            return queryset.none()
+
+        # Regular employees can only see their own history
+        return queryset.filter(employee=user)
 
 
 class HolidayViewSet(viewsets.ModelViewSet):

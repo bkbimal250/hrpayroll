@@ -48,6 +48,7 @@ from .filters import (
     CustomUserFilter, DeviceUserFilter, AttendanceFilter, LeaveFilter, 
     DocumentFilter, NotificationFilter, ShiftFilter, EmployeeShiftAssignmentFilter
 )
+from .pagination import StandardResultsSetPagination
 
 
 # Removed CustomUserFilter class definition as it is now in filters.py
@@ -891,6 +892,7 @@ class OfficeViewSet(viewsets.ModelViewSet):
 class CustomUserViewSet(viewsets.ModelViewSet):
     """ViewSet for CustomUser model"""
     serializer_class = CustomUserSerializer
+    pagination_class = StandardResultsSetPagination
     filter_backends = [filters.OrderingFilter, DjangoFilterBackend]
     ordering_fields = ['username', 'first_name', 'last_name', 'created_at']
     filterset_class = CustomUserFilter
@@ -1374,9 +1376,11 @@ class DeviceViewSet(viewsets.ModelViewSet):
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
+
 class AttendanceViewSet(viewsets.ModelViewSet):
     """ViewSet for Attendance model"""
     serializer_class = AttendanceSerializer
+    pagination_class = StandardResultsSetPagination
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_class = AttendanceFilter
     search_fields = ['user__first_name', 'user__last_name', 'notes']

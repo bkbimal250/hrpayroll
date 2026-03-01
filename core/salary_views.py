@@ -912,6 +912,38 @@ def salary_creation_status(request):
                 sample_dates = [s.salary_month.strftime('%Y-%m-%d') for s in salaries[:5]]
                 logger.info(f"Sample salary_month dates found: {sample_dates}")
         
+        # Month details for attendance calculations
+        from coreapp.models import Holiday
+        import calendar
+        
+        last_day = calendar.monthrange(year, month)[1]
+        start_dt = date(year, month, 1)
+        end_dt = date(year, month, last_day)
+        
+        # 1. Fetch all 'present' attendance counts for the month in one query
+        attendance_counts = Attendance.objects.filter(
+            date__range=[start_dt, end_dt],
+            status='present'
+        ).values('user_id').annotate(present_count=Count('id'))
+        
+        present_map = {str(item['user_id']): item['present_count'] for item in attendance_counts}
+        
+        # 2. Calculate Sundays in the month
+        total_sundays = 0
+        curr = start_dt
+        while curr <= end_dt:
+            if curr.weekday() == 6: # Sunday
+                total_sundays += 1
+            curr += timedelta(days=1)
+            
+        # 3. Fetch Holidays (excluding Sundays)
+        effective_holidays = Holiday.objects.filter(
+            date__range=[start_dt, end_dt]
+        ).exclude(date__week_day=1).count() # Django week_day: 1=Sunday, 2=Monday...
+        
+        # 4. Standard days logic (February vs Others)
+        standard_total_days = last_day if month == 2 else 30
+
         # Build response data
         employees_with_salary_list = []
         employees_without_salary_list = []
@@ -919,6 +951,10 @@ def salary_creation_status(request):
         # Process all users
         for employee in users.select_related('office', 'department', 'designation').order_by('first_name', 'last_name'):
             employee_id_str = str(employee.id)
+            
+            # Attendance summary for this employee
+            p_days = present_map.get(employee_id_str, 0)
+            total_worked = p_days + total_sundays + effective_holidays
             
             employee_data = {
                 'id': employee_id_str,
@@ -934,6 +970,12 @@ def salary_creation_status(request):
                 'designation': employee.designation.name if employee.designation else None,
                 'salary': float(employee.salary) if employee.salary else 0.0,
                 'pay_bank_name': employee.pay_bank_name or '',
+                # Attendance summary
+                'biometric_days': p_days,
+                'total_sundays': total_sundays,
+                'holiday_count': effective_holidays,
+                'total_working_days': total_worked,
+                'standard_total_days': standard_total_days
             }
             
             if employee_id_str in employees_with_salary_ids:
@@ -942,13 +984,16 @@ def salary_creation_status(request):
                 employee_data['salary_id'] = str(salary.id)
                 employee_data['salary_status'] = salary.status
                 employee_data['net_salary'] = float(salary.net_salary) if salary.net_salary else 0.0
+                # Use stored worked_days if available, otherwise calculated
+                employee_data['worked_days'] = float(salary.worked_days)
                 employee_data['created_at'] = salary.created_at.isoformat() if salary.created_at else None
                 employees_with_salary_list.append(employee_data)
             else:
-                # Employee does NOT have salary for this month - this is what we want to show
+                # Employee does NOT have salary for this month
                 employee_data['salary_id'] = None
                 employee_data['salary_status'] = 'not_created'
                 employee_data['net_salary'] = 0.0
+                employee_data['worked_days'] = total_worked
                 employee_data['created_at'] = None
                 employees_without_salary_list.append(employee_data)
         

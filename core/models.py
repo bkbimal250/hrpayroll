@@ -1251,15 +1251,8 @@ class Salary(models.Model):
                 if holiday.date.weekday() != 6:
                     effective_holidays += 1
                     
-            # 4. Calculate Extra Days (to reach 30 standard days logic if applicable)
-            # Matches frontend "Extra Days" logic: 30 - actual_days if actual < 30
-            actual_days_in_month = (end_date - start_date).days + 1
-            extra_days = 0
-            if actual_days_in_month < 30:
-                extra_days = 30 - actual_days_in_month
-            
-            # Total Formula: Present + Sundays + Holidays(non-Sunday) + Extra
-            total_worked_days = present_days_count + total_sundays + effective_holidays + extra_days
+            # Total Formula: Present + Sundays + Holidays(non-Sunday)
+            total_worked_days = present_days_count + total_sundays + effective_holidays
             
             # Update worked_days
             self.worked_days = Decimal(str(total_worked_days))

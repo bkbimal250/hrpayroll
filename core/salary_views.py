@@ -3,11 +3,12 @@ Salary Management Views
 Comprehensive salary management system with auto-calculation from attendance
 """
 
+from django.db.models import Q
 from rest_framework import status, generics, permissions, filters
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from django.db.models import Q, Sum, Count, Avg, Max, Min
+from django.db.models import Sum, Count, Avg, Max, Min
 from django.utils import timezone
 from django.core.exceptions import ValidationError
 from django.conf import settings
@@ -53,27 +54,30 @@ class SalaryListView(generics.ListCreateAPIView):
         ).all()
 
         # Role-based filtering
-        if user.role == 'admin':
-            # Admin can see all salaries
+        if user.role in ['admin', 'accountant']:
+            # Admin and Accountant can see all salaries
             pass
         elif user.role == 'manager':
-            # Manager can see salaries of employees in their office
+            # Manager can see salaries of employees in their office OR their own salary
             if user.office:
-                queryset = queryset.filter(employee__office=user.office)
-        elif user.role == 'accountant':
-            # Accountant can see all salaries
-            pass
+                queryset = queryset.filter(Q(employee__office=user.office) | Q(employee=user))
+            else:
+                # Manager without office can only see their own salary
+                queryset = queryset.filter(employee=user)
         elif user.role == 'employee':
             # Employee can only see their own salaries
             queryset = queryset.filter(employee=user)
 
         # Additional filters
+        employee_id = self.request.query_params.get('employee_id') or self.request.query_params.get('employee')
         office_id = self.request.query_params.get('office_id')
         department_id = self.request.query_params.get('department_id')
         status_filter = self.request.query_params.get('status')
         year = self.request.query_params.get('year')
         month = self.request.query_params.get('month')
-
+        
+        if employee_id:
+            queryset = queryset.filter(employee_id=employee_id)
         if office_id:
             queryset = queryset.filter(employee__office_id=office_id)
         if department_id:

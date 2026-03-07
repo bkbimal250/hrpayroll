@@ -601,6 +601,11 @@ class ReportsViewSet(viewsets.ViewSet):
             else:
                 end_date = datetime(year, month + 1, 1).date() - timedelta(days=1)
             
+            # Fetch holidays for the month
+            from coreapp.models import Holiday
+            holidays_in_month = set(Holiday.objects.filter(date__range=[start_date, end_date]).values_list('date', flat=True))
+            total_holidays = len(holidays_in_month)
+            
             # Get users
             users_query = CustomUser.objects.filter(role='employee', is_active=True)
             total_users_before_filter = users_query.count()
@@ -627,17 +632,31 @@ class ReportsViewSet(viewsets.ViewSet):
                 present_days = attendance_records.filter(status='present').count()
                 late_days = attendance_records.filter(status='late').count()
                 half_days = attendance_records.filter(status='half_day').count()
+                recorded_holiday_days = attendance_records.filter(status='holiday').count()
                 
-                # Calculate absent days - days without attendance records or with absent status
-                # Absent = Total working days - Days with any attendance record
-                attended_days = attendance_records.count()
-                absent_days = total_days - attended_days
+                # Check for holidays that don't have an attendance record yet
+                attended_dates = set(attendance_records.values_list('date', flat=True))
+                missing_holiday_dates = holidays_in_month - attended_dates
                 
-                # If there are records with 'absent' status, add them to absent_days
+                holiday_days = recorded_holiday_days + len(missing_holiday_dates)
+                
+                # Calculate absent days - days without attendance records or with absent status, 
+                # excluding holidays and future/upcoming days
+                today = date.today()
+                attended_days_count = attendance_records.count()
+                
+                # Inferred absent = total days so far - attended days - holidays so far
+                # But let's keep it simple: total_days - attended_days - missing holidays
+                absent_days = total_days - attended_days_count - len(missing_holiday_dates)
+                
+                # If there are records with 'absent' status, they are already in attended_days_count
+                # and would be counted as "not present". Wait, let's be more precise.
+                
+                # Explicit absent: records with status='absent'
                 explicit_absent_days = attendance_records.filter(status='absent').count()
-                absent_days += explicit_absent_days
                 
-                # Ensure absent_days is not negative
+                # Truly absent = (Total days passed - attended non-absent days - holidays passed)
+                # For simplicity, we'll use:
                 absent_days = max(0, absent_days)
                 
                 # Log the calculation for debugging
@@ -665,6 +684,7 @@ class ReportsViewSet(viewsets.ViewSet):
                     'total_days': total_days,
                     'present_days': present_days,
                     'absent_days': absent_days,
+                    'holiday_days': holiday_days,
                     'late_days': late_days,
                     'half_days': half_days,
                     'total_hours': round(total_hours, 2),
@@ -684,6 +704,7 @@ class ReportsViewSet(viewsets.ViewSet):
             if report_data:
                 total_present = sum(record['present_days'] for record in report_data)
                 total_absent = sum(record['absent_days'] for record in report_data)
+                total_holiday = sum(record['holiday_days'] for record in report_data)
                 total_late = sum(record['late_days'] for record in report_data)
                 
                 # Safe calculation of total hours and attendance percentage
@@ -710,6 +731,7 @@ class ReportsViewSet(viewsets.ViewSet):
                     'totalEmployees': len(report_data),
                     'totalPresentDays': total_present,
                     'totalAbsentDays': total_absent,
+                    'totalHolidayDays': total_holiday,
                     'totalLateDays': total_late,
                     'totalHours': round(total_hours, 2),
                     'averageAttendanceRate': round(avg_attendance, 2)
@@ -1411,6 +1433,7 @@ class AttendanceViewSet(viewsets.ModelViewSet):
         present_records = queryset.filter(status='present').count()
         absent_records = queryset.filter(status='absent').count()
         late_records = queryset.filter(status='late').count()
+        holiday_records = queryset.filter(status='holiday').count()
         half_day_records = queryset.filter(day_status='half_day').count()
         complete_day_records = queryset.filter(day_status='complete_day').count()
         late_coming_records = queryset.filter(is_late=True).count()
@@ -1440,6 +1463,7 @@ class AttendanceViewSet(viewsets.ModelViewSet):
             'present_records': present_records,
             'absent_records': absent_records,
             'late_records': late_records,
+            'holiday_records': holiday_records,
             'half_day_records': half_day_records,
             'complete_day_records': complete_day_records,
             'late_coming_records': late_coming_records,
@@ -1613,6 +1637,14 @@ class AttendanceViewSet(viewsets.ModelViewSet):
             # Create a dictionary for quick lookup
             attendance_dict = {att.date: att for att in existing_attendance}
             
+            # Get holidays for the month
+            from coreapp.models import Holiday
+            holidays_in_month = Holiday.objects.filter(
+                date__gte=first_day,
+                date__lte=last_day
+            )
+            holiday_dict = {h.date: h.name for h in holidays_in_month}
+            
             # Prepare monthly data with all days
             monthly_data = []
             
@@ -1622,8 +1654,25 @@ class AttendanceViewSet(viewsets.ModelViewSet):
                     attendance = attendance_dict[day]
                     is_sunday = day.weekday() == 6
 
+                    # Rule: If the day is a holiday, ensure status is holiday even if record exists
+                    if day in holiday_dict:
+                        monthly_data.append({
+                            'id': str(attendance.id),
+                            'date': day.isoformat(),
+                            'check_in_time': attendance.check_in_time.isoformat() if attendance.check_in_time else None,
+                            'check_out_time': attendance.check_out_time.isoformat() if attendance.check_out_time else None,
+                            'total_hours': float(attendance.total_hours) if attendance.total_hours else None,
+                            'status': 'holiday',
+                            'day_status': 'holiday',
+                            'is_late': False,
+                            'late_minutes': 0,
+                            'device_name': attendance.device.name if attendance.device else None,
+                            'notes': f"Holiday: {holiday_dict[day]}",
+                            'created_at': attendance.created_at.isoformat() if attendance.created_at else None,
+                            'updated_at': attendance.updated_at.isoformat() if attendance.updated_at else None,
+                        })
                     # Rule: If the day is Sunday and the user is not present, treat as weekend
-                    if is_sunday and attendance.status not in ['present', 'half_day']:
+                    elif is_sunday and attendance.status not in ['present', 'half_day']:
                         monthly_data.append({
                             'id': str(attendance.id),
                             'date': day.isoformat(),
@@ -1665,6 +1714,11 @@ class AttendanceViewSet(viewsets.ModelViewSet):
                         status = 'upcoming'
                         day_status = 'upcoming'
                         notes = 'Upcoming day'
+                    elif day in holiday_dict:
+                        # Holiday check
+                        status = 'holiday'
+                        day_status = 'holiday'
+                        notes = f"Holiday: {holiday_dict[day]}"
                     elif is_sunday:
                         # Only Sunday - mark as weekend
                         status = 'weekend'
@@ -1696,6 +1750,7 @@ class AttendanceViewSet(viewsets.ModelViewSet):
             total_days_in_month = len(all_days)
             present_days = sum(1 for day in monthly_data if day['status'] in ['present', 'half_day'])
             absent_days = sum(1 for day in monthly_data if day['status'] == 'absent')
+            holiday_days = sum(1 for day in monthly_data if day['status'] == 'holiday')
             upcoming_days = sum(1 for day in monthly_data if day['status'] == 'upcoming')
             weekend_days = sum(1 for day in monthly_data if day['status'] == 'weekend')
             complete_days = sum(1 for day in monthly_data if day['day_status'] == 'complete_day')
@@ -1739,6 +1794,7 @@ class AttendanceViewSet(viewsets.ModelViewSet):
                     'total_days_in_month': total_days_in_month,
                     'present_days': present_days,
                     'absent_days': absent_days,
+                    'holiday_days': holiday_days,
                     'upcoming_days': upcoming_days,
                     'weekend_days': weekend_days,
                     'complete_days': complete_days,
@@ -1791,15 +1847,15 @@ class AttendanceViewSet(viewsets.ModelViewSet):
                     status=status.HTTP_400_BAD_REQUEST
                 )
             
-            if new_status not in ['present', 'absent', 'upcoming', 'weekend']:
+            if new_status not in ['present', 'absent', 'holiday', 'upcoming', 'weekend']:
                 return Response(
-                    {'error': 'Status must be either "present", "absent", "upcoming", or "weekend"'}, 
+                    {'error': 'Status must be either "present", "absent", "holiday", "upcoming", or "weekend"'}, 
                     status=status.HTTP_400_BAD_REQUEST
                 )
             
-            if new_day_status and new_day_status not in ['complete_day', 'half_day', 'absent', 'upcoming', 'weekend']:
+            if new_day_status and new_day_status not in ['complete_day', 'half_day', 'absent', 'holiday', 'upcoming', 'weekend']:
                 return Response(
-                    {'error': 'Day status must be either "complete_day", "half_day", "absent", "upcoming", or "weekend"'}, 
+                    {'error': 'Day status must be either "complete_day", "half_day", "absent", "holiday", "upcoming", or "weekend"'}, 
                     status=status.HTTP_400_BAD_REQUEST
                 )
             

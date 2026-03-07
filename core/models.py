@@ -503,14 +503,22 @@ class Attendance(models.Model):
                 self.late_minutes = 0
                 return
             
-            # Get working hours settings for the user's office
-            office = self.user.office
-            half_day_hours = 5.0  # default
-            if office:
-                settings = WorkingHoursSettings.objects.filter(office=office).first()
-                if settings:
-                    half_day_hours = float(settings.half_day_threshold) / 60  # Convert minutes to hours
-            
+            # Check for holiday
+            try:
+                from coreapp.models import Holiday
+                if Holiday.objects.filter(date=self.date).exists():
+                    # Employee came on holiday (has check-in) → Present
+                    # Employee didn't come on holiday (no check-in) → Holiday
+                    if not self.check_in_time:
+                        self.status = 'holiday'
+                        self.day_status = 'holiday'
+                        self.is_late = False
+                        self.late_minutes = 0
+                        return
+                    # else: fall through to normal present/late calculation below
+            except Exception:
+                pass
+
             # Check if present (has check-in time)
             if not self.check_in_time:
                 self.status = 'absent'
@@ -518,6 +526,14 @@ class Attendance(models.Model):
                 self.is_late = False
                 self.late_minutes = 0
                 return
+            
+            # Get working hours settings for the user's office
+            office = self.user.office
+            half_day_hours = 5.0  # default
+            if office:
+                settings = WorkingHoursSettings.objects.filter(office=office).first()
+                if settings:
+                    half_day_hours = float(settings.half_day_threshold) / 60  # Convert minutes to hours
             
             # === Determine late_coming_threshold based on shift or office settings ===
             # Priority: 1) Employee's assigned shift  2) WorkingHoursSettings  3) Default

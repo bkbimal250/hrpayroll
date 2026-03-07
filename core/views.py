@@ -1654,19 +1654,21 @@ class AttendanceViewSet(viewsets.ModelViewSet):
                     attendance = attendance_dict[day]
                     is_sunday = day.weekday() == 6
 
-                    # Rule: If the day is a holiday, ensure status is holiday even if record exists
-                    if day in holiday_dict:
+                    # Rule: Holiday date logic:
+                    #   - Employee checked in on holiday → Present (use real attendance data)
+                    #   - Employee did NOT check in on holiday → Holiday
+                    if day in holiday_dict and not attendance.check_in_time:
                         monthly_data.append({
                             'id': str(attendance.id),
                             'date': day.isoformat(),
-                            'check_in_time': attendance.check_in_time.isoformat() if attendance.check_in_time else None,
-                            'check_out_time': attendance.check_out_time.isoformat() if attendance.check_out_time else None,
-                            'total_hours': float(attendance.total_hours) if attendance.total_hours else None,
+                            'check_in_time': None,
+                            'check_out_time': None,
+                            'total_hours': None,
                             'status': 'holiday',
                             'day_status': 'holiday',
                             'is_late': False,
                             'late_minutes': 0,
-                            'device_name': attendance.device.name if attendance.device else None,
+                            'device_name': None,
                             'notes': f"Holiday: {holiday_dict[day]}",
                             'created_at': attendance.created_at.isoformat() if attendance.created_at else None,
                             'updated_at': attendance.updated_at.isoformat() if attendance.updated_at else None,

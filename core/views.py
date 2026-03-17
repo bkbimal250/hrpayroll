@@ -660,7 +660,7 @@ class ReportsViewSet(viewsets.ViewSet):
                 absent_days = max(0, absent_days)
                 
                 # Log the calculation for debugging
-                logger.info(f"User {user.get_full_name()}: total_days={total_days}, attended_days={attended_days}, explicit_absent={explicit_absent_days}, calculated_absent={absent_days}")
+                logger.info(f"User {user.get_full_name()}: total_days={total_days}, attended_days={attended_days_count}, explicit_absent={explicit_absent_days}, calculated_absent={absent_days}")
                 
                 # Calculate total hours - convert to float to avoid decimal type issues
                 try:
@@ -740,9 +740,11 @@ class ReportsViewSet(viewsets.ViewSet):
             })
 
         except Exception as e:
-            logger.error(f"Error generating monthly summary: {str(e)}")
+            import traceback
+            error_msg = f"Error generating monthly summary: {str(e)}\n{traceback.format_exc()}"
+            logger.error(error_msg)
             return Response(
-                {'error': f'Failed to generate monthly summary: {str(e)}'}, 
+                {'error': error_msg}, 
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 

@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Relieving Letter</title>
+
+<style>
+    @page {
+        size: A4;
+        margin: 0;
+    }
+
+    html, body {
+        margin: 0;
+        padding: 0;
+        font-family: "Times New Roman", serif;
+        background: #d8d2d2;
+    }
+
+    .page {
+        width: 210mm;
+        height: 297mm;
+        box-sizing: border-box;
+        padding: 18mm 22mm 20mm 22mm;
+        position: relative;
+    }
+
+    /* ===== HEADER ===== */
+    .header-blue {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 8mm;
+        background: #0c2c63;
+    }
+
+    .header-red {
+        position: absolute;
+        top: 8mm; /* FIXED alignment */
+        left: 0;
+        width: 100%;
+        height: 4mm;
+        background: #e33b3b;
+    }
+
+    /* ===== FOOTER ===== */
+    .footer-blue {
+        position: absolute;
+        bottom: 0;
+        left: 0;
+        width: 100%;
+        height: 10mm;
+        background: #0c2c63;
+    }
+
+    .footer-red {
+        position: absolute;
+        bottom: 0;
+        right: 0;
+        width: 75mm;
+        height: 10mm;
+        background: #e33b3b;
+        clip-path: polygon(30% 0, 100% 0, 100% 100%, 0% 100%);
+    }
+
+    /* ===== LOGO ===== */
+    .logo {
+        width: 28mm;
+        margin-top: 2mm; /* FIXED (no negative margin) */
+    }
+
+    /* ===== COMPANY ===== */
+    .company {
+        margin-top: 4mm;
+    }
+
+    .company h1 {
+        font-size: 30px;
+        margin: 0;
+    }
+
+    .address {
+        font-size: 15px;
+        margin-top: 2mm;
+        line-height: 1.5;
+    }
+
+    /* ===== TITLE ===== */
+    .title {
+        text-align: center;
+        font-size: 22px;
+        font-weight: bold;
+        margin: 6mm 0 0mm 0;
+    }
+
+    /* ===== CONTENT ===== */
+    .content {
+        font-size: 16px;
+        line-height: 1.3;
+    }
+
+    .bold {
+        font-weight: bold;
+    }
+
+    /* ===== SIGNATURE ===== */
+    .signature-section {
+        margin-top: 10mm;
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-end;
+    }
+
+    .sign-area {
+        position: relative;
+        width: 200px;
+        height: 110px;
+    }
+
+    .stamp {
+        position: absolute;
+        bottom: 0;
+        left: 0;
+        width: 85px;
+    }
+
+    .sign {
+        position: absolute;
+        bottom: 5px;
+        left: 45px;
+        width: 100px;
+    }
+
+    .manager {
+        font-size: 20px;
+        font-weight: bold;
+    }
+
+    .company-blue {
+        color: #1a56b3;
+        font-size: 18px;
+        font-weight: bold;
+    }
+
+    .employee {
+        font-size: 18px;
+        font-weight: bold;
+    }
+
+</style>
+</head>
+
+<body>
+
+<div class="page">
+
+    <!-- HEADER -->
+    <div class="header-blue"></div>
+    <div class="header-red"></div>
+
+    <!-- LOGO -->
+    <img class="logo" src="{{logo}}">
+
+    <!-- COMPANY -->
+    <div class="company">
+        <h1>DISHA ONLINE SOLUTION</h1>
+
+        <div class="address">
+            Bhumiraj Costarica, 9th Floor Office No-907<br>
+            Plot No- 1 & 2, Sector 18, Sanpada,<br>
+            Navi Mumbai, Maharashtra 400705
+        </div>
+    </div>
+
+    <!-- TITLE -->
+    <div class="title">RELIEVING LETTER</div>
+
+ <!-- CONTENT -->
+<div class="content">
+
+    <p>Date: <span class="bold">{{date}}</span></p>
+
+    <p>To,</p>
+
+    <p>
+        <span class="bold">{{title}} {{employee_name}}</span><br>
+        <span class="bold">{{designation}}</span>
+    </p>
+
+    <p><span class="bold">Subject:</span> Relieving Letter</p>
+
+    <p>Dear <span class="bold">{{title}} {{employee_name}}</span>,</p>
+
+    <p>
+        This is to confirm that your resignation dated 
+        <span class="bold">{{resignation_date}}</span> has been accepted by the management. 
+        You are hereby relieved from your duties as 
+        <span class="bold">{{designation}}</span> with effect from the close of business on 
+        <span class="bold">{{last_working_day}}</span>.
+    </p>
+
+    <p>
+        During your tenure with us from 
+        <span class="bold">{{joining_date}}</span> to 
+        <span class="bold">{{last_working_day}}</span>, 
+        you have been associated with the organization in a professional capacity. 
+        We appreciate your valuable contributions and the efforts you have made towards the growth of the organization.
+    </p>
+
+    <p>
+        We confirm that all your responsibilities have been duly handed over, 
+        and there are no outstanding dues pending from your side.
+    </p>
+
+    <p>
+        We thank you for your services and wish you continued success and growth in all your future endeavors.
+    </p>
+
+    <p>Warm regards,</p>
+
+    <!-- SIGNATURE -->
+    <div class="signature-section">
+
+        <div>
+            <div class="sign-area">
+                <img class="stamp" src="{{stamp}}">
+                <img class="sign" src="{{signature}}">
+            </div>
+
+            <div class="manager">Manager</div>
+            <div class="company-blue">Disha Online Solutions</div>
+        </div>
+
+        <div class="employee">
+            {{employee_name}}
+        </div>
+
+    </div>
+
+</div>
+
+    <!-- FOOTER -->
+    <div class="footer-blue"></div>
+    <div class="footer-red"></div>
+
+</div>
+
+</body>
+</html>

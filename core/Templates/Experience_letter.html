@@ -3,47 +3,47 @@
 
 <head>
     <meta charset="UTF-8">
-    <title>Offer Letter</title>
+    <title>Experience Letter</title>
 
     <style>
-        /* 🔥 REMOVE ALL PRINT MARGINS */
         @page {
             size: A4;
             margin: 0;
         }
 
-        html,
         body {
             margin: 0;
-            padding: 0;
             font-family: "Times New Roman", serif;
             background: #d8d2d2;
+
         }
 
         .page {
             width: 210mm;
             height: 297mm;
+            overflow: hidden;
+            /* 🔥 IMPORTANT */
             position: relative;
             box-sizing: border-box;
-            padding: 20mm 20mm 20mm 20mm;
+            padding: 18mm 18mm 0mm 22mm;
+            /* slightly reduced */
         }
 
         /* ================= HEADER ================= */
 
-        .header-blue {
+        .header {
             position: absolute;
             top: 0;
             left: 0;
             width: 100%;
-            height: 12mm;
+        }
+
+        .header-blue {
+            height: 10mm;
             background: #0b2d67;
         }
 
         .header-red {
-            position: absolute;
-            top: 12mm;
-            left: 0;
-            width: 100%;
             height: 4mm;
             background: #e3363a;
         }
@@ -51,116 +51,132 @@
         /* ================= LOGO ================= */
 
         .logo {
-            width: 36mm;
+            width: 34mm;
             margin-top: 2mm;
         }
 
         /* ================= COMPANY ================= */
 
         .company {
-            margin-top: 5mm;
+            margin-top: 4mm;
+            padding-bottom: 2mm;
         }
 
         .company h1 {
+            font-size: 32px;
             margin: 0;
-            font-size: 28px;
+            font-weight: bold;
         }
 
         .address {
-            font-size: 14px;
-            line-height: 1.4;
+            font-size: 16px;
+            line-height: 1.2;
         }
 
         /* ================= TITLE ================= */
 
         .title {
             text-align: center;
-            font-size: 22px;
             font-weight: bold;
-            margin: 15px 0;
+            font-size: 26px;
+            margin: 6mm 0;
+            letter-spacing: 1px;
         }
 
         /* ================= CONTENT ================= */
 
         .content {
-            font-size: 16px;
-            line-height: 1.5;
+            font-size: 18px;
+            line-height: 1.4;
+            padding-bottom: 22mm;
+            /* space for footer */
         }
 
         .bold {
             font-weight: bold;
         }
 
+        .date {
+            margin-bottom: 6mm;
+        }
+
         /* ================= SIGNATURE ================= */
 
-        .signature {
-            margin-top: 40px;
+        .signature-section {
+            margin-top: 16mm;
             display: flex;
             justify-content: space-between;
             align-items: flex-end;
+            page-break-inside: avoid;
         }
 
         .sign-area {
             position: relative;
-            width: 160px;
-            height: 90px;
+            width: 220px;
+            height: 120px;
         }
 
         .stamp {
             position: absolute;
             bottom: 0;
             left: 0;
-            width: 70px;
+            width: 90px;
         }
 
         .sign {
             position: absolute;
-            bottom: 5px;
-            left: 45px;
-            width: 85px;
+            bottom: 10px;
+            left: 55px;
+            width: 100px;
         }
 
         .manager {
+            font-size: 22px;
             font-weight: bold;
-            margin-top: 5px;
         }
 
         .company-blue {
             color: #1a56b3;
+            font-size: 20px;
             font-weight: bold;
         }
 
         .employee {
+            font-size: 20px;
             font-weight: bold;
         }
 
         /* ================= FOOTER ================= */
 
-        .footer {
+        .footer-wrapper {
             position: absolute;
             bottom: 0;
             left: 0;
             width: 100%;
             height: 12mm;
+        }
+
+        .footer-blue {
+            position: absolute;
+            width: 100%;
+            height: 100%;
             background: #0b2d67;
         }
 
         .footer-gray {
             position: absolute;
-            bottom: 0;
-            right: 70mm;
+            right: 65mm;
             width: 35mm;
-            height: 12mm;
+            height: 100%;
             background: #c7c9d3;
             clip-path: polygon(25% 0, 100% 0, 100% 100%, 0% 100%);
         }
 
         .footer-red {
             position: absolute;
-            bottom: 0;
             right: 0;
             width: 85mm;
-            height: 12mm;
+            height: 100%;
             background: #e3363a;
             clip-path: polygon(25% 0, 100% 0, 100% 100%, 0% 100%);
         }
@@ -172,8 +188,10 @@
     <div class="page">
 
         <!-- HEADER -->
-        <div class="header-blue"></div>
-        <div class="header-red"></div>
+        <div class="header">
+            <div class="header-blue"></div>
+            <div class="header-red"></div>
+        </div>
 
         <!-- LOGO -->
         <img class="logo" src="{{logo}}">
@@ -181,72 +199,69 @@
         <!-- COMPANY -->
         <div class="company">
             <h1>{{company_name}}</h1>
+
             <div class="address">
                 Bhumiraj Costarica, 9th Floor Office No- 907<br>
-                Plot No- 1 & 2, Sector 18, Sanpada,<br>
+                Plot No- 1 & 2,
+                Sector 18, Sanpada,<br>
                 Navi Mumbai, Maharashtra 400705
             </div>
         </div>
 
-        <!-- DATE -->
-        <p class="bold">{{offer_date}}</p>
-
         <!-- TITLE -->
-        <div class="title">OFFER LETTER</div>
+        <div class="title">
+            EXPERIENCE LETTER
+        </div>
 
-        <!-- CONTENT -->
         <!-- CONTENT -->
         <div class="content">
 
-            <p>Dear <span class="bold">{{title}} {{employee_name}}</span>,</p>
+            <p class="date">
+                Date: <span class="bold">{{created_date}}</span>
+            </p>
+
+            <p>To Whom It May Concern,</p>
 
             <p>
-                We are pleased to offer you the position of
-                <span class="bold">{{position}}</span>
-                at <span class="bold">{{office_name}}</span>.
+                This is to certify that
+                <span class="bold">{{title}} {{employee_name}}</span>
+                was employed with
+                <span class="bold">{{company_name}}</span>
+                as a
+                <span class="bold">{{designation}}</span>
+                at
+                <span class="bold">{{office_name}}</span>
+                from
+                <span class="bold">{{joining_date}}</span>
+                to
+                <span class="bold">{{last_working_day}}</span>.
             </p>
 
             <p>
-                Your employment will commence from
-                <span class="bold">{{start_date}}</span>, and your starting salary will be
-                <span class="bold">{{salary}}</span>.
+                During the above-mentioned period, <b>{{title}} {{employee_name}}</b>
+                was found to be sincere, hardworking, and dedicated towards
+                their duties. They carried out all assigned responsibilities
+                efficiently and maintained a professional attitude at all times.
             </p>
 
             <p>
-                You will be expected to perform your duties with sincerity and dedication,
-                and contribute positively to the growth and success of the organization.
-            </p>
-
-            <p>
-                You will be on a probation period as per company policy, during which your
-                performance and conduct will be reviewed.
-            </p>
-
-            <p>
-                You are required to maintain confidentiality of all company information
-                and comply with general company policies and guidelines.
-            </p>
-
-            <p>
-                Please confirm your acceptance of this offer by signing and returning this letter.
-            </p>
-
-            <p>
-                We look forward to a mutually rewarding association and wish you success in your role.
+                We appreciate <b>{{title}} {{employee_name}}</b>’s contribution to the
+                organization and wish them every success in their future career.
             </p>
 
             <p>Sincerely,</p>
 
             <!-- SIGNATURE -->
-            <div class="signature">
+            <div class="signature-section">
 
                 <div>
                     <div class="sign-area">
                         <img class="stamp" src="{{stamp}}">
                         <img class="sign" src="{{signature}}">
                     </div>
-                    <div class="manager">{{manager_title}}</div>
-                    <div class="company-blue">{{company_name}}</div>
+
+                    <div class="manager">Manager</div>
+                    <div class="company-blue">Disha Online Solution</div>
                 </div>
 
                 <div class="employee">
@@ -258,9 +273,11 @@
         </div>
 
         <!-- FOOTER -->
-        <div class="footer"></div>
-        <div class="footer-gray"></div>
-        <div class="footer-red"></div>
+        <div class="footer-wrapper">
+            <div class="footer-blue"></div>
+            <div class="footer-gray"></div>
+            <div class="footer-red"></div>
+        </div>
 
     </div>
 

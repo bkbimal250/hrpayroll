@@ -933,6 +933,8 @@ class DocumentTemplate(models.Model):
         ('offer_letter', 'Offer Letter'),
         ('salary_increment', 'Salary Increment Letter'),
         ('salary_slip', 'Salary Slip'),
+        ('experience_letter', 'Experience letter'),
+        ('relieving_letter', 'Relieving Letter'),
     ]
     
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)

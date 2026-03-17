@@ -125,6 +125,7 @@ class CustomUserSerializer(serializers.ModelSerializer):
     designation_name = serializers.SerializerMethodField()
     full_name = serializers.SerializerMethodField()
     profile_picture_url = serializers.SerializerMethodField()
+    has_resignation = serializers.SerializerMethodField()
     
     class Meta:
         model = CustomUser
@@ -136,7 +137,8 @@ class CustomUserSerializer(serializers.ModelSerializer):
             'emergency_contact_phone', 'emergency_contact_relationship',
             'account_holder_name', 'bank_name', 'account_number', 'ifsc_code', 'bank_branch_name',
             'upi_qr', 'bank_account_updated_at',
-            'is_active', 'last_login', 'created_at', 'updated_at', 'password'
+            'is_active', 'last_login', 'created_at', 'updated_at', 'password',
+            'has_resignation'
         ]
         read_only_fields = ('id', 'last_login', 'created_at', 'updated_at')
         extra_kwargs = {
@@ -174,6 +176,11 @@ class CustomUserSerializer(serializers.ModelSerializer):
                 return request.build_absolute_uri(obj.profile_picture.url)
             return obj.profile_picture.url
         return None
+
+    def get_has_resignation(self, obj):
+        """Check if the user has an approved resignation"""
+        from .models import Resignation
+        return Resignation.objects.filter(user=obj, status='approved').exists()
 
     def validate(self, attrs):
         """Validate user data"""

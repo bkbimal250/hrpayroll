@@ -16,9 +16,25 @@ from django.utils.dateparse import parse_date
 # WeasyPrint availability will be checked when needed by check_weasyprint_availability()
 # Do not import at module level to avoid startup crashes if missing
 WEASYPRINT_AVAILABLE = None
-PDF_CONSTRUCTOR_ARGS = None
-
 from io import BytesIO
+import ssl
+import base64
+import requests
+import threading
+
+# Image cache to avoid repeated network requests
+IMAGE_CACHE = {}
+IMAGE_CACHE_LOCK = threading.Lock()
+
+# Fix for SSL certificate verification issues on Windows for WeasyPrint/Cloudinary
+try:
+    _create_unverified_https_context = ssl._create_unverified_context
+except AttributeError:
+    # Legacy Python that doesn't verify HTTPS certificates by default
+    pass
+else:
+    # Handle target environment that doesn't have proper certs
+    ssl._create_default_https_context = _create_unverified_https_context
 
 def check_weasyprint_availability():
     """Check if WeasyPrint is available and return status"""
@@ -1058,9 +1074,31 @@ class DocumentGenerationViewSet(viewsets.ViewSet):
             logger.error(f"Error reading salary increment template: {e}")
             return "<html><body><h1>Error loading template</h1></body></html>"
 
-      
+    def get_experience_letter_template(self):
+        """Professional experience letter template from external file"""
+        import os
+        from django.conf import settings
+        
+        template_path = os.path.join(settings.BASE_DIR, 'core', 'Templates', 'Experience_letter.html')
+        try:
+            with open(template_path, 'r', encoding='utf-8') as file:
+                return file.read()
+        except Exception as e:
+            logger.error(f"Error reading experience letter template: {e}")
+            return "<html><body><h1>Error loading template</h1></body></html>"
 
-
+    def get_relieving_letter_template(self):
+        """Professional relieving letter template from external file"""
+        import os
+        from django.conf import settings
+        
+        template_path = os.path.join(settings.BASE_DIR, 'core', 'Templates', 'Releving_letter.html')
+        try:
+            with open(template_path, 'r', encoding='utf-8') as file:
+                return file.read()
+        except Exception as e:
+            logger.error(f"Error reading relieving letter template: {e}")
+            return "<html><body><h1>Error loading template</h1></body></html>"
 
     def format_currency(self, amount):
         """Format currency in Indian format with proper word representation"""
@@ -1180,6 +1218,30 @@ class DocumentGenerationViewSet(viewsets.ViewSet):
             "", "", "Twenty", "Thirty", "Forty", "Fifty", "Sixty", "Seventy", "Eighty", "Ninety"
         ]
     
+    def get_base64_image(self, url):
+        """Fetch image from URL and return as base64 string"""
+        if not url:
+            return ""
+            
+        with IMAGE_CACHE_LOCK:
+            if url in IMAGE_CACHE:
+                return IMAGE_CACHE[url]
+        
+        try:
+            response = requests.get(url, timeout=10, verify=False)
+            if response.status_code == 200:
+                content_type = response.headers.get('Content-Type', 'image/png')
+                encoded_string = base64.b64encode(response.content).decode('utf-8')
+                base64_data = f"data:{content_type};base64,{encoded_string}"
+                
+                with IMAGE_CACHE_LOCK:
+                    IMAGE_CACHE[url] = base64_data
+                return base64_data
+        except Exception as e:
+            logger.error(f"Error fetching image from {url}: {e}")
+            
+        return url # Fallback to original URL if fetching fails
+
     def get_logo_url(self):
         """Get the company logo URL"""
         from django.conf import settings
@@ -1191,12 +1253,27 @@ class DocumentGenerationViewSet(viewsets.ViewSet):
             # Use production domain
             domain = "https://dosapi.attendance.dishaonliesolution.workspa.in"
             # Return absolute URL for the logo
-            return f"{domain}{settings.MEDIA_URL}documents/companylogo.png"
+            logo_url = f"{domain}{settings.MEDIA_URL}documents/companylogo.png"
         else:
-            # Return a placeholder or default logo
-            domain = "https://dosapi.attendance.dishaonliesolution.workspa.in"
-            return f"{domain}{settings.MEDIA_URL}documents/companylogo.png"
+            # Return a placeholder logo
+            logo_url = "https://res.cloudinary.com/dm2bxj0gx/image/upload/v1773744100/dos_logo_me8lqb.png"
+            
+        return self.get_base64_image(logo_url)
     
+    def get_common_images(self, document_type=None):
+        """Get base64 encoded common images like logo, stamp, and signature"""
+        images = {
+            'logo': self.get_logo_url(),
+            'signature': self.get_base64_image("https://res.cloudinary.com/dm2bxj0gx/image/upload/v1769696269/dinesh_signature_vgbkmh.png"),
+        }
+        
+        if document_type == 'offer_letter':
+            images['stamp'] = self.get_base64_image("https://res.cloudinary.com/dm2bxj0gx/image/upload/v1769696236/disha_stamp_j2liis.png")
+        else:
+            images['stamp'] = self.get_base64_image("https://res.cloudinary.com/dm2bxj0gx/image/upload/v1769696174/2_niwh6i.png")
+            
+        return images
+
     def generate_document_content(self, employee, document_type, data):
         """Generate document content using template"""
         
@@ -1217,14 +1294,26 @@ class DocumentGenerationViewSet(viewsets.ViewSet):
             else:
                 start_date_formatted = ''
             
+            # Determine title based on gender
+            gender_title = ""
+            if employee.gender == 'M':
+                gender_title = "Mr."
+            elif employee.gender == 'F':
+                gender_title = "Mrs."
+            
             context = {
+                'title': gender_title,
                 'employee_name': employee.get_full_name(),
                 'employee_id': employee.employee_id if employee.employee_id else str(employee.id)[:8].upper(),
                 'position': data.get('position', ''),
+                'office_name': employee.office.name if employee.office else 'Disha Online Solutions',
                 'start_date': start_date_formatted,
-                'starting_salary': self.format_currency(data.get('starting_salary')),
+                'salary': self.format_currency(data.get('starting_salary') or data.get('salary')),
+                'offer_date': start_date_formatted,
                 'current_date': datetime.now().strftime('%A, %d %B %Y'),
                 'logo_url': self.get_logo_url(),
+                'company_name': 'Disha Online Solutions',
+                'manager_title': 'Manager',
             }
             
         elif document_type == 'salary_increment':
@@ -1446,9 +1535,126 @@ class DocumentGenerationViewSet(viewsets.ViewSet):
                 'joining_date': (emp if salary_record else employee).joining_date.strftime('%d-%m-%Y') if (emp if salary_record else employee).joining_date else None,
             }
         
+        elif document_type == 'experience_letter':
+            template_content = self.get_experience_letter_template()
+            
+            # Format joining date
+            joining_date_formatted = employee.joining_date.strftime('%d-%m-%Y') if employee.joining_date else 'Not specified'
+            
+            # Prioritize fetching from Resignation model
+            from .models import Resignation
+            resignation = Resignation.objects.filter(user=employee, status='approved').order_by('-created_at').first()
+            
+            if resignation and resignation.last_working_date:
+                lwd_formatted = resignation.last_working_date.strftime('%d-%m-%Y')
+            else:
+                # Fallback to provided data directly
+                last_working_day = data.get('last_working_day', '')
+                if last_working_day:
+                    try:
+                        if isinstance(last_working_day, str):
+                            lwd_obj = parse_date(last_working_day)
+                        else:
+                            lwd_obj = last_working_day
+                        lwd_formatted = lwd_obj.strftime('%d-%m-%Y') if lwd_obj else str(last_working_day)
+                    except:
+                        lwd_formatted = str(last_working_day)
+                else:
+                    lwd_formatted = 'Not specified'
+
+            # Determine title based on gender
+            gender_title = ""
+            if employee.gender == 'M':
+                gender_title = "Mr."
+            elif employee.gender == 'F':
+                gender_title = "Mrs."
+            
+            # Resignation logic moved above context
+
+            context = {
+                'title': gender_title,
+                'employee_name': employee.get_full_name(),
+                'designation': employee.designation.name if employee.designation else 'Not specified',
+                'joining_date': joining_date_formatted,
+                'last_working_day': lwd_formatted,
+                'office_name': employee.office.name if employee.office else 'Disha Online Solution',
+                'company_name': 'Disha Online Solution',
+                'created_date': datetime.now().strftime('%d-%m-%Y'),
+                'logo_url': self.get_logo_url(),
+            }
+            
+        elif document_type == 'relieving_letter':
+            template_content = self.get_relieving_letter_template()
+            
+            # Format joining date
+            joining_date_formatted = employee.joining_date.strftime('%d-%m-%Y') if employee.joining_date else 'Not specified'
+            
+            # Prioritize fetching from Resignation model
+            from .models import Resignation
+            resignation = Resignation.objects.filter(user=employee, status='approved').order_by('-created_at').first()
+            
+            if resignation:
+                rd_formatted = resignation.resignation_date.strftime('%d-%m-%Y') if resignation.resignation_date else 'Not specified'
+                lwd_formatted = resignation.last_working_date.strftime('%d-%m-%Y') if resignation.last_working_date else 'Not specified'
+            else:
+                # Fallback to provided data
+                last_working_day = data.get('last_working_day', '')
+                resignation_date = data.get('resignation_date', '')
+                
+                # Format last working day
+                if last_working_day:
+                    try:
+                        if isinstance(last_working_day, str):
+                            lwd_obj = parse_date(last_working_day)
+                        else:
+                            lwd_obj = last_working_day
+                        lwd_formatted = lwd_obj.strftime('%d-%m-%Y') if lwd_obj else str(last_working_day)
+                    except:
+                        lwd_formatted = str(last_working_day)
+                else:
+                    lwd_formatted = 'Not specified'
+                    
+                # Format resignation date
+                if resignation_date:
+                    try:
+                        if isinstance(resignation_date, str):
+                            rd_obj = parse_date(resignation_date)
+                        else:
+                            rd_obj = resignation_date
+                        rd_formatted = rd_obj.strftime('%d-%m-%Y') if rd_obj else str(resignation_date)
+                    except:
+                        rd_formatted = str(resignation_date)
+                else:
+                    rd_formatted = 'Not specified'
+
+            # Determine title based on gender
+            gender_title = ""
+            if employee.gender == 'M':
+                gender_title = "Mr."
+            elif employee.gender == 'F':
+                gender_title = "Mrs."
+                
+            # Resignation logic moved above context
+
+            context = {
+                'title': gender_title,
+                'employee_name': employee.get_full_name(),
+                'designation': employee.designation.name if employee.designation else 'Not specified',
+                'joining_date': joining_date_formatted,
+                'office_name': employee.office.name if employee.office else 'Disha Online Solution',
+                'company_name': 'Disha Online Solution',
+                'last_working_day': lwd_formatted,
+                'resignation_date': rd_formatted,
+                'date': datetime.now().strftime('%d-%m-%Y'),
+                'logo_url': self.get_logo_url(),
+            }
+            
         else:
             raise ValueError(f"Unsupported document type: {document_type}")
         
+        # Add common images (logo, signatures, stamps) as base64 to ensure they load in PDFs
+        context.update(self.get_common_images(document_type))
+            
         # Render template
         template = Template(template_content)
         rendered_content = template.render(Context(context))
@@ -1550,6 +1756,16 @@ class DocumentGenerationViewSet(viewsets.ViewSet):
                 status=status.HTTP_403_FORBIDDEN
             )
         
+        # Check if employee has applied for resignation for Experience/Relieving letters
+        if document_type in ['experience_letter', 'relieving_letter']:
+            from .models import Resignation
+            has_resignation = Resignation.objects.filter(user=employee, status='approved').exists()
+            if not has_resignation:
+                return Response(
+                    {'error': 'Only employees with an approved resignation can have Experience or Relieving letters generated.'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+        
         try:
             # Generate document content
             content = self.generate_document_content(employee, document_type, data)
@@ -1584,6 +1800,10 @@ class DocumentGenerationViewSet(viewsets.ViewSet):
                     template_content = self.get_offer_letter_template()
                 elif document_type == 'salary_increment':
                     template_content = self.get_salary_increment_template()
+                elif document_type == 'experience_letter':
+                    template_content = self.get_experience_letter_template()
+                elif document_type == 'relieving_letter':
+                    template_content = self.get_relieving_letter_template()
                 else:
                     template_content = "<html><body><h1>Document</h1></body></html>"
                 

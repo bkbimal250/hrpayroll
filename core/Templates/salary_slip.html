@@ -15,7 +15,7 @@
             margin: 0;
             padding: 0;
             color: #000;
-            background: #fff;
+            background: #d8d2d2;
         }
 
         .page {
@@ -148,7 +148,9 @@
 
         <!-- HEADER -->
         <div class="header">
-            {% if logo_url %}
+            {% if logo %}
+            <img src="{{ logo }}" class="company-logo">
+            {% elif logo_url %}
             <img src="{{ logo_url }}" class="company-logo">
             {% endif %}
             <div class="company-name">DISHA ONLINE SOLUTION</div>

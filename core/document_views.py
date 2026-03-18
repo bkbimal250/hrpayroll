@@ -113,10 +113,13 @@ class DocumentTemplateViewSet(viewsets.ModelViewSet):
         serializer.save(created_by=self.request.user)
 
 
+from .pagination import StandardResultsSetPagination
+
 class GeneratedDocumentViewSet(viewsets.ModelViewSet):
     """ViewSet for managing generated documents"""
     queryset = GeneratedDocument.objects.all()
     serializer_class = GeneratedDocumentSerializer
+    pagination_class = StandardResultsSetPagination
     permission_classes = [IsAuthenticated]
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['document_type', 'is_sent', 'generated_at']

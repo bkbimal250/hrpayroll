@@ -102,11 +102,12 @@ class APIAuthenticationDebugMiddleware:
         
         return response
 
-class AdminCSPMiddleware:
-    """Middleware to set permissive CSP headers for Django admin panel
+class GlobalCSPMiddleware:
+    """Middleware to set Content Security Policy (CSP) headers globally.
     
-    This allows Alpine.js (used by django-unfold) to work properly by
-    allowing 'unsafe-eval' for the admin panel only.
+    This includes:
+    - wss: and ws: in connect-src for WebSockets (Channels).
+    - permissive CSP for admin panel to allow Alpine.js (unsafe-eval).
     """
     
     def __init__(self, get_response):
@@ -115,19 +116,29 @@ class AdminCSPMiddleware:
     def __call__(self, request):
         response = self.get_response(request)
         
-        # Only apply CSP override for admin URLs
+        # Base CSP for general application
+        # Includes ws: and wss: in connect-src for WebSockets
+        csp_policy = (
+            "default-src 'self' https: http: data: blob:; "
+            "script-src 'self' https: http: 'unsafe-inline'; "
+            "style-src 'self' https: http: 'unsafe-inline'; "
+            "img-src 'self' data: https: http: blob:; "
+            "font-src 'self' data: https: http:; "
+            "connect-src 'self' https: http: ws: wss:; "
+            "frame-ancestors 'self';"
+        )
+        
+        # Override for admin panel to allow Alpine.js (needs unsafe-eval)
         if request.path.startswith('/admin/'):
-            # Set permissive CSP for admin panel to allow Alpine.js
-            # This allows 'unsafe-eval' which Alpine.js needs for dynamic evaluation
             csp_policy = (
                 "default-src 'self' 'unsafe-inline' 'unsafe-eval' data: blob:; "
                 "script-src 'self' 'unsafe-inline' 'unsafe-eval' https: http:; "
                 "style-src 'self' 'unsafe-inline' https: http:; "
                 "img-src 'self' data: https: http: blob:; "
                 "font-src 'self' data: https: http:; "
-                "connect-src 'self' https: http:; "
+                "connect-src 'self' https: http: ws: wss:; "
                 "frame-ancestors 'self';"
             )
-            response['Content-Security-Policy'] = csp_policy
-        
+            
+        response['Content-Security-Policy'] = csp_policy
         return response

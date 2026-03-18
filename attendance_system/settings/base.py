@@ -79,7 +79,7 @@ THIRD_PARTY_MIDDLEWARE = [
 ]
 
 CUSTOM_MIDDLEWARE = [
-    'core.middleware.AdminCSPMiddleware',
+    'core.middleware.GlobalCSPMiddleware',
     'core.middleware.APIAuthenticationDebugMiddleware',
 ]
 

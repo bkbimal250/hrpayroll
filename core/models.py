@@ -933,7 +933,7 @@ class DocumentTemplate(models.Model):
         ('offer_letter', 'Offer Letter'),
         ('salary_increment', 'Salary Increment Letter'),
         ('salary_slip', 'Salary Slip'),
-        ('experience_letter', 'Experience letter'),
+        ('experience_letter', 'Experience Letter'),
         ('relieving_letter', 'Relieving Letter'),
     ]
     

@@ -126,6 +126,7 @@ class CustomUserSerializer(serializers.ModelSerializer):
     full_name = serializers.SerializerMethodField()
     profile_picture_url = serializers.SerializerMethodField()
     has_resignation = serializers.SerializerMethodField()
+    resignation_status = serializers.SerializerMethodField()
     
     class Meta:
         model = CustomUser
@@ -138,7 +139,7 @@ class CustomUserSerializer(serializers.ModelSerializer):
             'account_holder_name', 'bank_name', 'account_number', 'ifsc_code', 'bank_branch_name',
             'upi_qr', 'bank_account_updated_at',
             'is_active', 'last_login', 'created_at', 'updated_at', 'password',
-            'has_resignation'
+            'has_resignation', 'resignation_status'
         ]
         read_only_fields = ('id', 'last_login', 'created_at', 'updated_at')
         extra_kwargs = {
@@ -178,9 +179,15 @@ class CustomUserSerializer(serializers.ModelSerializer):
         return None
 
     def get_has_resignation(self, obj):
-        """Check if the user has an approved resignation"""
+        """Check if the user has a pending or approved resignation"""
         from .models import Resignation
-        return Resignation.objects.filter(user=obj, status='approved').exists()
+        return Resignation.objects.filter(user=obj, status__in=['pending', 'approved']).exists()
+
+    def get_resignation_status(self, obj):
+        """Get the current resignation status of the user"""
+        from .models import Resignation
+        latest_resignation = Resignation.objects.filter(user=obj).order_by('-created_at').first()
+        return latest_resignation.status if latest_resignation else None
 
     def validate(self, attrs):
         """Validate user data"""

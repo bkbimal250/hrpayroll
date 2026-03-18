@@ -762,6 +762,23 @@ class GeneratedDocumentSerializer(serializers.ModelSerializer):
         read_only_fields = ['id', 'generated_at']
 
 
+class GeneratedDocumentListSerializer(serializers.ModelSerializer):
+    """Lightweight serializer for GeneratedDocument list view (excludes content)"""
+    employee_name = serializers.CharField(source='employee.get_full_name', read_only=True)
+    employee_email = serializers.CharField(source='employee.email', read_only=True)
+    generated_by_name = serializers.CharField(source='generated_by.get_full_name', read_only=True)
+    template_name = serializers.CharField(source='template.name', read_only=True)
+    
+    class Meta:
+        model = GeneratedDocument
+        fields = [
+            'id', 'employee', 'employee_name', 'employee_email', 'template', 'template_name',
+            'document_type', 'title', 'pdf_file', 'generated_by', 'generated_by_name',
+            'generated_at', 'sent_at', 'is_sent'
+        ]
+        read_only_fields = ['id', 'generated_at']
+
+
 class DocumentGenerationSerializer(serializers.Serializer):
     """Serializer for document generation requests"""
     employee_id = serializers.UUIDField()

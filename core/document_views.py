@@ -21,6 +21,7 @@ import ssl
 import base64
 import requests
 import threading
+from concurrent.futures import ThreadPoolExecutor
 
 # Image cache to avoid repeated network requests
 IMAGE_CACHE = {}
@@ -84,7 +85,8 @@ from .models import (
     CustomUser, DocumentTemplate, GeneratedDocument, Office
 )
 from .serializers import (
-    DocumentTemplateSerializer, GeneratedDocumentSerializer, DocumentGenerationSerializer
+    DocumentTemplateSerializer, GeneratedDocumentSerializer, 
+    GeneratedDocumentListSerializer, DocumentGenerationSerializer
 )
 
 logger = logging.getLogger(__name__)
@@ -121,6 +123,12 @@ class GeneratedDocumentViewSet(viewsets.ModelViewSet):
     search_fields = ['title', 'employee__first_name', 'employee__last_name', 'employee__username', 'employee__employee_id']
     ordering_fields = ['generated_at', 'is_sent', 'title']
     ordering = ['-generated_at']
+    
+    def get_serializer_class(self):
+        """Use lightweight serializer for list view"""
+        if self.action == 'list':
+            return GeneratedDocumentListSerializer
+        return GeneratedDocumentSerializer
     
     def get_queryset(self):
         user = self.request.user
@@ -226,48 +234,56 @@ class GeneratedDocumentViewSet(viewsets.ModelViewSet):
                 # Generate proper filename
                 filename = self.generate_document_filename(document)
                 
-                # Get company logo path and information
-                logo_path = ""
-                company_name = "Your Company Name"
-                company_address = "Company Address, City, State, ZIP"
-                
-                try:
-                    import os
-                    from django.conf import settings
+                # Determine if we should use the content directly or wrap it in a generic skeleton
+                # Many professional templates already provide a full HTML skeleton
+                content_to_check = document.content.strip().lower()
+                if content_to_check.startswith('<!doctype html') or content_to_check.startswith('<html'):
+                    logger.info(f"Using document.content directly (full HTML detected) for document {document.id}")
+                    html_content = document.content
+                else:
+                    logger.info(f"Wrapping document.content in generic skeleton for document {document.id}")
+                    # Get company logo path and information
+                    logo_path = ""
+                    company_name = "Your Company Name"
+                    company_address = "Company Address, City, State, ZIP"
                     
-                    # Try different logo locations
-                    logo_locations = [
-                        os.path.join(settings.MEDIA_ROOT, 'documents', 'companylogo.png'),
-                        os.path.join(settings.MEDIA_ROOT, 'companylogo.png'),
-                        os.path.join(settings.MEDIA_ROOT, 'logo.png'),
-                        os.path.join(settings.STATIC_ROOT, 'images', 'logo.png') if hasattr(settings, 'STATIC_ROOT') else None
-                    ]
+                    try:
+                        import os
+                        from django.conf import settings
+                        
+                        # Try different logo locations
+                        logo_locations = [
+                            os.path.join(settings.MEDIA_ROOT, 'documents', 'companylogo.png'),
+                            os.path.join(settings.MEDIA_ROOT, 'companylogo.png'),
+                            os.path.join(settings.MEDIA_ROOT, 'logo.png'),
+                            os.path.join(settings.STATIC_ROOT, 'images', 'logo.png') if hasattr(settings, 'STATIC_ROOT') else None
+                        ]
+                        
+                        for logo_file in logo_locations:
+                            if logo_file and os.path.exists(logo_file):
+                                logo_path = f"file://{logo_file}"
+                                logger.info(f"Company logo found: {logo_path}")
+                                break
+                        
+                        if not logo_path:
+                            logger.warning("Company logo not found, using text header")
+                        
+                        # Get company information from settings or use defaults
+                        company_name = getattr(settings, 'COMPANY_NAME', 'Your Company Name')
+                        company_address = getattr(settings, 'COMPANY_ADDRESS', 'Company Address, City, State, ZIP')
+                        company_phone = getattr(settings, 'COMPANY_PHONE', '+1 (555) 123-4567')
+                        company_email = getattr(settings, 'COMPANY_EMAIL', 'conatact.dishaonliesolution@gmail.com')
+                        company_website = getattr(settings, 'COMPANY_WEBSITE', 'https://dishaonliesolution.in')
+                        
+                    except Exception as e:
+                        logger.warning(f"Could not load company information: {e}")
                     
-                    for logo_file in logo_locations:
-                        if logo_file and os.path.exists(logo_file):
-                            logo_path = f"file://{logo_file}"
-                            logger.info(f"Company logo found: {logo_path}")
-                            break
+                    # Get employee ID from user
+                    employee_id = document.user.employee_id if document.user.employee_id else str(document.user.id)[:8].upper()
                     
-                    if not logo_path:
-                        logger.warning("Company logo not found, using text header")
-                    
-                    # Get company information from settings or use defaults
-                    company_name = getattr(settings, 'COMPANY_NAME', 'Your Company Name')
-                    company_address = getattr(settings, 'COMPANY_ADDRESS', 'Company Address, City, State, ZIP')
-                    company_phone = getattr(settings, 'COMPANY_PHONE', '+1 (555) 123-4567')
-                    company_email = getattr(settings, 'COMPANY_EMAIL', 'conatact.dishaonliesolution@gmail.com')
-                    company_website = getattr(settings, 'COMPANY_WEBSITE', 'https://dishaonliesolution.in')
-                    
-                except Exception as e:
-                    logger.warning(f"Could not load company information: {e}")
-                
-                # Get employee ID from user
-                employee_id = document.user.employee_id if document.user.employee_id else str(document.user.id)[:8].upper()
-                
-                # Enhance the document content with professional, compact CSS for A4 printing
-                html_content = f"""
-                <!DOCTYPE html>
+                    # Enhance the document content with professional, compact CSS for A4 printing
+                    html_content = f"""
+                    <!DOCTYPE html>
                 <html>
                 <head>
                     <meta charset="utf-8">
@@ -1261,17 +1277,42 @@ class DocumentGenerationViewSet(viewsets.ViewSet):
         return self.get_base64_image(logo_url)
     
     def get_common_images(self, document_type=None):
-        """Get base64 encoded common images like logo, stamp, and signature"""
-        images = {
-            'logo': self.get_logo_url(),
-            'signature': self.get_base64_image("https://res.cloudinary.com/dm2bxj0gx/image/upload/v1769696269/dinesh_signature_vgbkmh.png"),
+        """Get base64 encoded common images like logo, stamp, and signature in parallel"""
+        # Determine URLs to fetch
+        urls = {
+            'logo': "https://res.cloudinary.com/dm2bxj0gx/image/upload/v1773744100/dos_logo_me8lqb.png", # Default
+            'signature': "https://res.cloudinary.com/dm2bxj0gx/image/upload/v1769696269/dinesh_signature_vgbkmh.png",
         }
         
         if document_type == 'offer_letter':
-            images['stamp'] = self.get_base64_image("https://res.cloudinary.com/dm2bxj0gx/image/upload/v1769696236/disha_stamp_j2liis.png")
+            urls['stamp'] = "https://res.cloudinary.com/dm2bxj0gx/image/upload/v1769696236/disha_stamp_j2liis.png"
         else:
-            images['stamp'] = self.get_base64_image("https://res.cloudinary.com/dm2bxj0gx/image/upload/v1769696174/2_niwh6i.png")
-            
+            urls['stamp'] = "https://res.cloudinary.com/dm2bxj0gx/image/upload/v1769696174/2_niwh6i.png"
+
+        # Check for local logo which is preferred
+        try:
+            from django.conf import settings
+            import os
+            logo_path = os.path.join(settings.MEDIA_ROOT, 'documents', 'companylogo.png')
+            if os.path.exists(logo_path):
+                domain = "https://dosapi.attendance.dishaonliesolution.workspa.in"
+                urls['logo'] = f"{domain}{settings.MEDIA_URL}documents/companylogo.png"
+        except:
+            pass
+
+        # Use a list to maintain order and results
+        images = {}
+        with ThreadPoolExecutor(max_workers=3) as executor:
+            # Create a map of future to key
+            future_to_key = {executor.submit(self.get_base64_image, url): key for key, url in urls.items()}
+            for future in future_to_key:
+                key = future_to_key[future]
+                try:
+                    images[key] = future.result()
+                except Exception as e:
+                    logger.error(f"Error fetching image for {key}: {e}")
+                    images[key] = urls[key] # Fallback to original URL
+                    
         return images
 
     def generate_document_content(self, employee, document_type, data):

@@ -1284,7 +1284,7 @@ class DocumentGenerationViewSet(viewsets.ViewSet):
         # Determine URLs to fetch
         urls = {
             'logo': "https://res.cloudinary.com/dm2bxj0gx/image/upload/v1773744100/dos_logo_me8lqb.png", # Default
-            'signature': "https://res.cloudinary.com/dm2bxj0gx/image/upload/v1769696269/dinesh_signature_vgbkmh.png",
+            'signature': "https://res.cloudinary.com/dm2bxj0gx/image/upload/v1777727241/Shailesh_Logo_cltial.png",
         }
         
         if document_type == 'offer_letter':

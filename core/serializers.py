@@ -393,6 +393,7 @@ class DocumentSerializer(serializers.ModelSerializer):
     file_url = serializers.SerializerMethodField()
     file_type = serializers.SerializerMethodField()
     file_size = serializers.SerializerMethodField()
+    salary_month = serializers.SerializerMethodField()
     
     # Include full user objects
     user = CustomUserSerializer(read_only=True)
@@ -403,7 +404,7 @@ class DocumentSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'title', 'document_type', 'file', 'description', 
             'user', 'user_name', 'uploaded_by', 'uploaded_by_name',
-            'created_at', 'updated_at', 'file_url', 'file_type', 'file_size'
+            'created_at', 'updated_at', 'file_url', 'file_type', 'file_size', 'salary_month'
         ]
         read_only_fields = ('id', 'created_at', 'updated_at')
     
@@ -439,6 +440,33 @@ class DocumentSerializer(serializers.ModelSerializer):
             # File doesn't exist or can't be accessed
             return 0
         return 0
+
+    def get_salary_month(self, obj):
+        """Extract or calculate the salary month for a document"""
+        if obj.document_type == 'salary_slip':
+            import re
+            title = obj.title
+            
+            # Pattern for standard month names
+            months_pattern = r'\b(january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\b'
+            year_pattern = r'\b(20\d{2})\b'
+            
+            month_match = re.search(months_pattern, title, re.IGNORECASE)
+            year_match = re.search(year_pattern, title)
+            
+            month = month_match.group(0).title() if month_match else None
+            year = year_match.group(0) if year_match else None
+            
+            if month and year:
+                return f"{month} {year}"
+            elif month:
+                return month
+            elif year:
+                return year
+            
+            if obj.created_at:
+                return obj.created_at.strftime("%B %Y")
+        return "N/A"
 
 
 class DocumentCreateSerializer(serializers.ModelSerializer):
@@ -758,15 +786,63 @@ class GeneratedDocumentSerializer(serializers.ModelSerializer):
     employee_email = serializers.CharField(source='employee.email', read_only=True)
     generated_by_name = serializers.CharField(source='generated_by.get_full_name', read_only=True)
     template_name = serializers.CharField(source='template.name', read_only=True)
+    salary_month = serializers.SerializerMethodField()
     
     class Meta:
         model = GeneratedDocument
         fields = [
             'id', 'employee', 'employee_name', 'employee_email', 'template', 'template_name',
             'document_type', 'title', 'content', 'pdf_file', 'generated_by', 'generated_by_name',
-            'generated_at', 'sent_at', 'is_sent', 'offer_data', 'increment_data', 'salary_data'
+            'generated_at', 'sent_at', 'is_sent', 'offer_data', 'increment_data', 'salary_data',
+            'salary_month'
         ]
         read_only_fields = ['id', 'generated_at']
+
+    def get_salary_month(self, obj):
+        """Extract or calculate the salary month for a generated document"""
+        if obj.document_type == 'salary_slip':
+            month = None
+            year = None
+            if obj.salary_data:
+                try:
+                    data = obj.salary_data
+                    if isinstance(data, str):
+                        import json
+                        data = json.loads(data)
+                    month = data.get('salary_month', '')
+                    year = data.get('salary_year', '')
+                except Exception:
+                    pass
+            
+            if month and year:
+                return f"{str(month).strip().title()} {str(year).strip()}"
+            elif month:
+                return str(month).strip().title()
+            elif year:
+                return str(year).strip()
+            
+            # Fallback to title regex search
+            import re
+            title = obj.title
+            months_pattern = r'\b(january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\b'
+            year_pattern = r'\b(20\d{2})\b'
+            
+            month_match = re.search(months_pattern, title, re.IGNORECASE)
+            year_match = re.search(year_pattern, title)
+            
+            month = month_match.group(0).title() if month_match else None
+            year = year_match.group(0) if year_match else None
+            
+            if month and year:
+                return f"{month} {year}"
+            elif month:
+                return month
+            elif year:
+                return year
+            
+            if obj.generated_at:
+                return obj.generated_at.strftime("%B %Y")
+        return "N/A"
 
 
 class GeneratedDocumentListSerializer(serializers.ModelSerializer):
@@ -775,15 +851,20 @@ class GeneratedDocumentListSerializer(serializers.ModelSerializer):
     employee_email = serializers.CharField(source='employee.email', read_only=True)
     generated_by_name = serializers.CharField(source='generated_by.get_full_name', read_only=True)
     template_name = serializers.CharField(source='template.name', read_only=True)
+    salary_month = serializers.SerializerMethodField()
     
     class Meta:
         model = GeneratedDocument
         fields = [
             'id', 'employee', 'employee_name', 'employee_email', 'template', 'template_name',
             'document_type', 'title', 'pdf_file', 'generated_by', 'generated_by_name',
-            'generated_at', 'sent_at', 'is_sent'
+            'generated_at', 'sent_at', 'is_sent', 'salary_month'
         ]
         read_only_fields = ['id', 'generated_at']
+
+    def get_salary_month(self, obj):
+        """Extract or calculate the salary month for a generated document"""
+        return GeneratedDocumentSerializer.get_salary_month(self, obj)
 
 
 class DocumentGenerationSerializer(serializers.Serializer):

@@ -13,10 +13,11 @@ import time
 import signal
 import threading
 import json
+import multiprocessing
 from datetime import datetime, timedelta
 from django.core.management.base import BaseCommand, CommandError
 from django.utils import timezone
-from django.db import transaction, connection
+from django.db import transaction, connection, close_old_connections
 from django.conf import settings
 from django.core.cache import cache
 
@@ -44,12 +45,37 @@ except ImportError:
     ZK_AVAILABLE = False
     logger.warning("pyzk library not available. Install with: pip install pyzk")
 
+
+def _run_device_fetch_worker(device_id, result_queue):
+    """Fetch one device in an isolated process so a stuck device cannot block the service."""
+    try:
+        close_old_connections()
+        device = Device.objects.get(id=device_id)
+        service = AutoAttendanceService(interval=0, use_process_isolation=False)
+        service._fetch_device_data(device)
+        result_queue.put({
+            'success': True,
+            'device_id': str(device_id),
+            'stats': service.get_stats(),
+        })
+    except Exception as exc:
+        result_queue.put({
+            'success': False,
+            'device_id': str(device_id),
+            'error': str(exc),
+        })
+    finally:
+        close_old_connections()
+
+
 class AutoAttendanceService:
     """Automatic attendance fetching service with duplicate prevention"""
     
-    def __init__(self, interval=30, max_workers=3):
+    def __init__(self, interval=30, max_workers=3, device_timeout=60, use_process_isolation=True):
         self.interval = interval
         self.max_workers = max_workers
+        self.device_timeout = device_timeout
+        self.use_process_isolation = use_process_isolation
         self.running = False
         self.thread = None
         self.devices = []
@@ -150,11 +176,74 @@ class AutoAttendanceService:
             try:
                 # Check if device should be fetched (respect device-specific intervals)
                 if self._should_fetch_device(device, current_time):
-                    self._fetch_device_data(device)
+                    self._fetch_device_with_guard(device)
                     
             except Exception as e:
                 logger.error(f"Error fetching from device {device.name}: {str(e)}")
                 self.stats['errors'] += 1
+
+    def _fetch_device_with_guard(self, device):
+        """Fetch one device with a hard timeout so the next device still runs."""
+        if not self.use_process_isolation:
+            self._fetch_device_data(device)
+            return
+
+        start_method = 'fork' if 'fork' in multiprocessing.get_all_start_methods() else 'spawn'
+        ctx = multiprocessing.get_context(start_method)
+        result_queue = ctx.Queue(maxsize=1)
+        process = ctx.Process(
+            target=_run_device_fetch_worker,
+            args=(device.id, result_queue),
+            daemon=True,
+        )
+
+        logger.info(f"Starting isolated fetch for {device.name} with {self.device_timeout}s timeout")
+        process.start()
+        process.join(self.device_timeout)
+
+        if process.is_alive():
+            logger.error(
+                f"Device fetch timed out for {device.name} after {self.device_timeout}s. "
+                "Skipping this device and continuing."
+            )
+            process.terminate()
+            process.join(timeout=5)
+            if process.is_alive():
+                process.kill()
+                process.join(timeout=2)
+
+            self.stats['errors'] += 1
+            self.last_fetch_times[device.id] = timezone.now()
+            result_queue.close()
+            close_old_connections()
+            return
+
+        result = None
+        try:
+            result = result_queue.get(timeout=1)
+        except Exception:
+            pass
+        finally:
+            result_queue.close()
+
+        self.last_fetch_times[device.id] = timezone.now()
+        close_old_connections()
+
+        if not result:
+            self.stats['errors'] += 1
+            logger.error(f"Device fetch for {device.name} ended without a result")
+            return
+
+        if not result.get('success'):
+            self.stats['errors'] += 1
+            logger.error(f"Device fetch failed for {device.name}: {result.get('error', 'Unknown error')}")
+            return
+
+        child_stats = result.get('stats') or {}
+        self.stats['total_records'] += child_stats.get('total_records', 0)
+        self.stats['duplicates_prevented'] += child_stats.get('duplicates_prevented', 0)
+        self.stats['errors'] += child_stats.get('errors', 0)
+        logger.info(f"Device fetch completed for {device.name}")
                 
     def _should_fetch_device(self, device, current_time):
         """Check if device should be fetched based on last fetch time"""
@@ -529,6 +618,12 @@ class Command(BaseCommand):
             help='Fetch interval in seconds (default: 30)'
         )
         parser.add_argument(
+            '--device-timeout',
+            type=int,
+            default=60,
+            help='Maximum seconds allowed for one device fetch before skipping it (default: 60)'
+        )
+        parser.add_argument(
             '--daemon',
             action='store_true',
             help='Run as daemon process'
@@ -557,11 +652,16 @@ class Command(BaseCommand):
         try:
             interval = options['interval']
             daemon = options['daemon']
+            device_timeout = options['device_timeout']
             
-            logger.info(f"Starting automatic attendance fetching service with {interval}s interval...")
+            logger.info(
+                f"Starting automatic attendance fetching service with {interval}s interval "
+                f"and {device_timeout}s per-device timeout..."
+            )
             
             # Initialize service
             auto_attendance_service.interval = interval
+            auto_attendance_service.device_timeout = device_timeout
             auto_attendance_service.start()
             
             if daemon:

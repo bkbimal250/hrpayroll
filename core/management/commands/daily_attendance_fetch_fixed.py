@@ -10,6 +10,7 @@ import sys
 import django
 from datetime import datetime, timedelta
 import hashlib
+import multiprocessing
 
 # Setup Django
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'attendance_system.settings')
@@ -17,7 +18,7 @@ django.setup()
 
 from django.core.management.base import BaseCommand
 from django.utils import timezone
-from django.db import transaction, connection
+from django.db import transaction, connection, close_old_connections
 from core.models import Device, CustomUser, Attendance
 
 # Disable signals to prevent Redis broadcasting
@@ -29,6 +30,35 @@ try:
     ZK_AVAILABLE = True
 except ImportError:
     ZK_AVAILABLE = False
+
+
+def _run_daily_device_fetch_worker(device_id, start_date, end_date, limit, result_queue):
+    """Fetch one daily device in a separate process so a stuck device can be skipped."""
+    try:
+        close_old_connections()
+        post_save.disconnect(attendance_saved, sender=Attendance)
+        device = Device.objects.get(id=device_id)
+        command = Command()
+        processed, new_records, duplicates = command.fetch_device_attendance(
+            device,
+            start_date,
+            end_date,
+            limit,
+        )
+        result_queue.put({
+            'success': True,
+            'processed': processed,
+            'new_records': new_records,
+            'duplicates': duplicates,
+        })
+    except Exception as exc:
+        result_queue.put({
+            'success': False,
+            'error': str(exc),
+        })
+    finally:
+        close_old_connections()
+
 
 class Command(BaseCommand):
     help = 'Daily attendance fetch from all devices (one by one) - Fixed version'
@@ -56,6 +86,12 @@ class Command(BaseCommand):
             default=1000,
             help='Limit number of records to process per device (default: 1000)'
         )
+        parser.add_argument(
+            '--device-timeout',
+            type=int,
+            default=60,
+            help='Maximum seconds allowed for one device fetch before skipping it (default: 60)'
+        )
     
     def handle(self, *args, **options):
         if not ZK_AVAILABLE:
@@ -71,6 +107,7 @@ class Command(BaseCommand):
         device_name = options['device']
         show_summary = options['show_summary']
         limit = options['limit']
+        device_timeout = options['device_timeout']
         
         self.stdout.write(
             self.style.SUCCESS(f" Starting daily attendance fetch (last {days} days)")
@@ -83,6 +120,7 @@ class Command(BaseCommand):
             self.stdout.write(
                 self.style.WARNING("No active devices found")
             )
+            post_save.connect(attendance_saved, sender=Attendance)
             return
         
         # Calculate date range
@@ -106,8 +144,8 @@ class Command(BaseCommand):
                 # Ensure fresh database connection for each device
                 connection.close()
                 
-                processed, new_records, duplicates = self.fetch_device_attendance(
-                    device, start_date, end_date, limit
+                processed, new_records, duplicates = self.fetch_device_attendance_with_guard(
+                    device, start_date, end_date, limit, device_timeout
                 )
                 
                 total_processed += processed
@@ -155,12 +193,63 @@ class Command(BaseCommand):
             queryset = queryset.filter(name__icontains=device_name)
         
         return list(queryset)
+
+    def fetch_device_attendance_with_guard(self, device, start_date, end_date, limit, device_timeout):
+        """Fetch one device with a hard timeout, then continue with the next device."""
+        start_method = 'fork' if 'fork' in multiprocessing.get_all_start_methods() else 'spawn'
+        ctx = multiprocessing.get_context(start_method)
+        result_queue = ctx.Queue(maxsize=1)
+        process = ctx.Process(
+            target=_run_daily_device_fetch_worker,
+            args=(device.id, start_date, end_date, limit, result_queue),
+            daemon=True,
+        )
+
+        process.start()
+        process.join(device_timeout)
+
+        if process.is_alive():
+            self.stdout.write(
+                self.style.ERROR(
+                    f"   {device.name}: timed out after {device_timeout}s, skipping and continuing"
+                )
+            )
+            process.terminate()
+            process.join(timeout=5)
+            if process.is_alive():
+                process.kill()
+                process.join(timeout=2)
+            result_queue.close()
+            connection.close()
+            return 0, 0, 0
+
+        result = None
+        try:
+            result = result_queue.get(timeout=1)
+        except Exception:
+            pass
+        finally:
+            result_queue.close()
+            connection.close()
+
+        if not result:
+            raise Exception("Device worker ended without a result")
+
+        if not result.get('success'):
+            raise Exception(result.get('error', 'Unknown device worker error'))
+
+        return (
+            result.get('processed', 0),
+            result.get('new_records', 0),
+            result.get('duplicates', 0),
+        )
     
     def fetch_device_attendance(self, device, start_date, end_date, limit=1000):
         """Fetch attendance from a single device with limit"""
         processed = 0
         new_records = 0
         duplicates = 0
+        conn = None
         
         try:
             # Connect to device
@@ -205,11 +294,18 @@ class Command(BaseCommand):
                 if i % (batch_size * 2) == 0:
                     self.stdout.write(f"    Progress: {i}/{len(recent_logs)} records processed")
             
-            conn.disconnect()
-            self.stdout.write(f"   🔌 Disconnected from {device.name}")
-            
         except Exception as e:
             raise Exception(f"Device error: {str(e)}")
+        finally:
+            if conn:
+                try:
+                    conn.disconnect()
+                    self.stdout.write(f"   Disconnected from {device.name}")
+                except Exception as disconnect_error:
+                    self.stdout.write(
+                        self.style.WARNING(f"   Disconnect warning for {device.name}: {disconnect_error}")
+                    )
+            connection.close()
         
         return processed, new_records, duplicates
     

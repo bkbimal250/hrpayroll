@@ -37,6 +37,12 @@ class Command(BaseCommand):
             help='Fetch interval in seconds (default: 30)'
         )
         parser.add_argument(
+            '--device-timeout',
+            type=int,
+            default=60,
+            help='Maximum seconds allowed for one device fetch before skipping it (default: 60)'
+        )
+        parser.add_argument(
             '--daemon',
             action='store_true',
             help='Run as daemon (background process)'
@@ -59,6 +65,7 @@ class Command(BaseCommand):
     
     def handle(self, *args, **options):
         interval = options['interval']
+        device_timeout = options['device_timeout']
         daemon_mode = options['daemon']
         foreground_mode = options['foreground']
         stop_service = options['stop']
@@ -77,7 +84,7 @@ class Command(BaseCommand):
         signal.signal(signal.SIGTERM, self.signal_handler)
         
         # Create service instance
-        self.service = AutoAttendanceService(interval=interval)
+        self.service = AutoAttendanceService(interval=interval, device_timeout=device_timeout)
         
         if daemon_mode:
             self.run_daemon_mode()

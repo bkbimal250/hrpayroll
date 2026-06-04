@@ -29,15 +29,17 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 class ContinuousAttendanceService:
-    def __init__(self, interval=30):
+    def __init__(self, interval=30, device_timeout=60):
         self.interval = interval
-        self.service = AutoAttendanceService(interval=interval)
+        self.device_timeout = device_timeout
+        self.service = AutoAttendanceService(interval=interval, device_timeout=device_timeout)
         self.running = False
         
     def start(self):
         """Start the continuous attendance service"""
         logger.info("Starting Continuous Attendance Service...")
         logger.info(f"Fetch interval: {self.interval} seconds")
+        logger.info(f"Per-device timeout: {self.device_timeout} seconds")
         
         # Register signal handlers for graceful shutdown
         signal.signal(signal.SIGINT, self.signal_handler)
@@ -86,14 +88,20 @@ class ContinuousAttendanceService:
         sys.exit(0)
 
 if __name__ == "__main__":
-    # Get interval from command line argument or use default
+    # Get interval and per-device timeout from command line arguments or use defaults
     interval = 30
+    device_timeout = 60
     if len(sys.argv) > 1:
         try:
             interval = int(sys.argv[1])
         except ValueError:
             logger.warning(f"Invalid interval '{sys.argv[1]}', using default: {interval}")
+    if len(sys.argv) > 2:
+        try:
+            device_timeout = int(sys.argv[2])
+        except ValueError:
+            logger.warning(f"Invalid device timeout '{sys.argv[2]}', using default: {device_timeout}")
     
     # Create and start the service
-    service = ContinuousAttendanceService(interval=interval)
+    service = ContinuousAttendanceService(interval=interval, device_timeout=device_timeout)
     service.start()

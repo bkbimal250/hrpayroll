@@ -21,6 +21,15 @@ ENVIRONMENT = os.environ.get('ENVIRONMENT', 'development')
 # =============================================================================
 SECRET_KEY = os.environ.get('SECRET_KEY', 'django-insecure-eg&hkh!w@e(%wx6aztj4+flb*fcl&a)*2zeh8rzzf^#n31!vb^')
 
+ALLOWED_HOSTS = [
+    host.strip()
+    for host in os.environ.get(
+        'ALLOWED_HOSTS',
+        'dosapi.attendance.dishaonliesolution.workspa.in,localhost,127.0.0.1'
+    ).split(',')
+    if host.strip()
+]
+
 # =============================================================================
 # APPLICATION CONFIGURATION
 # =============================================================================
@@ -201,6 +210,7 @@ SIMPLE_JWT = {
 # =============================================================================
 CORS_ALLOW_ALL_ORIGINS = False
 CORS_ALLOWED_ORIGINS = [
+    'https://dosapi.attendance.dishaonliesolution.workspa.in',
     'https://dosemployees.dishaonlinesolution.in',
     'https://dosmanagers.dishaonlinesolution.in',
     'https://admindos.dishaonlinesolution.in',
@@ -226,9 +236,28 @@ CORS_ALLOW_HEADERS = [
 ]
 CORS_ALLOW_ALL_HEADERS = True
 
+CSRF_TRUSTED_ORIGINS = [
+    origin.strip()
+    for origin in os.environ.get(
+        'CSRF_TRUSTED_ORIGINS',
+        (
+            'https://dosapi.attendance.dishaonliesolution.workspa.in,'
+            'https://dosemployees.dishaonlinesolution.in,'
+            'https://dosmanagers.dishaonlinesolution.in,'
+            'https://admindos.dishaonlinesolution.in,'
+            'https://dosaccounts.dishaonlinesolution.in,'
+            'http://localhost:5173,'
+            'http://127.0.0.1:5173'
+        )
+    ).split(',')
+    if origin.strip()
+]
+
 # =============================================================================
 # SECURITY SETTINGS (GENERAL)
 # =============================================================================
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+USE_X_FORWARDED_HOST = True
 X_FRAME_OPTIONS = 'SAMEORIGIN'
 SILENCED_SYSTEM_CHECKS = ['security.W019']
 

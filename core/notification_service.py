@@ -74,10 +74,9 @@ class NotificationService:
     def create_bulk_notifications(users, title, message, **kwargs):
         """Create notifications for multiple users"""
         from django.db import transaction
-        from celery import shared_task
         
         notifications = []
-        send_email = kwargs.get('send_email', False)
+        send_email = kwargs.pop('send_email', False)
         
         # Use database transaction for better performance
         with transaction.atomic():
@@ -92,6 +91,7 @@ class NotificationService:
                     user=user,
                     title=title,
                     message=message,
+                    send_email=False,
                     **kwargs
                 )
                 if notification:
@@ -106,19 +106,6 @@ class NotificationService:
                 logger.info(f"Queued {len(notifications)} emails for background sending")
             except Exception as e:
                 logger.error(f"Failed to queue email sending: {e}")
-                # Fallback: try to send emails synchronously (but don't fail the request)
-                for notification in notifications:
-                    # Only send emails to active users
-                    if notification.user.email and notification.user.is_active:
-                        try:
-                            from .email_service import EmailNotificationService
-                            EmailNotificationService.send_notification_email(notification)
-                            notification.is_email_sent = True
-                            notification.save(update_fields=['is_email_sent'])
-                        except Exception as email_error:
-                            logger.error(f"Failed to send email for notification {notification.id}: {email_error}")
-                    elif not notification.user.is_active:
-                        logger.info(f"Skipping email for inactive user: {notification.user.get_full_name()} ({notification.user.email})")
         
         return notifications
     

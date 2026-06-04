@@ -692,6 +692,43 @@ class SalarySummaryView(APIView):
 
 @api_view(['GET'])
 @permission_classes([permissions.IsAuthenticated, IsEmployeeSalaryAccess])
+def my_salary_history(request):
+    """
+    Get salary history for the authenticated user only.
+    This endpoint never trusts an employee id from the client.
+    """
+    user = request.user
+
+    salaries = Salary.objects.filter(employee=user).order_by('-salary_month')
+
+    year = request.query_params.get('year')
+    month = request.query_params.get('month')
+    status_filter = request.query_params.get('status')
+
+    if year:
+        salaries = salaries.filter(salary_month__year=year)
+    if month:
+        salaries = salaries.filter(salary_month__month=month)
+    if status_filter:
+        salaries = salaries.filter(status=status_filter)
+
+    serializer = SalarySerializer(salaries, many=True, context={'request': request})
+
+    return Response({
+        'employee': {
+            'id': str(user.id),
+            'name': user.get_full_name(),
+            'employee_id': user.employee_id,
+            'office': user.office.name if user.office else None,
+            'department': user.department.name if user.department else None
+        },
+        'salaries': serializer.data,
+        'total_salaries': salaries.count()
+    }, status=status.HTTP_200_OK)
+
+
+@api_view(['GET'])
+@permission_classes([permissions.IsAuthenticated, IsEmployeeSalaryAccess])
 def employee_salary_history(request, employee_id):
     """
     Get salary history for a specific employee

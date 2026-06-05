@@ -16,11 +16,4 @@ DATABASES = {
     }
 }
 
-# Channels Configuration for development
-CHANNEL_LAYERS = {
-    'default': {
-        'BACKEND': 'channels.layers.InMemoryChannelLayer',
-    },
-}
-
 STATICFILES_STORAGE = 'django.contrib.staticfiles.storage.StaticFilesStorage'

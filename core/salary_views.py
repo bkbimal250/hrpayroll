@@ -39,9 +39,13 @@ class SalaryListView(generics.ListCreateAPIView):
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
     search_fields = [
         'employee__first_name', 'employee__last_name', 'employee__email',
-        'employee__employee_id', 'status', 'salary_month'
+        'employee__employee_id', 'employee__office__name',
+        'employee__department__name', 'Bank_name', 'status'
     ]
-    ordering_fields = ['salary_month', 'created_at', 'status', 'net_salary']
+    ordering_fields = [
+        'salary_month', 'created_at', 'status', 'net_salary',
+        'employee__first_name', 'employee__employee_id', 'Bank_name'
+    ]
     ordering = ['-salary_month', '-created_at']
     # pagination_class = None  # Use default pagination
 
@@ -70,26 +74,80 @@ class SalaryListView(generics.ListCreateAPIView):
 
         # Additional filters
         employee_id = self.request.query_params.get('employee_id') or self.request.query_params.get('employee')
-        office_id = self.request.query_params.get('office_id')
-        department_id = self.request.query_params.get('department_id')
+        office_id = self.request.query_params.get('office_id') or self.request.query_params.get('office')
+        office_name = self.request.query_params.get('office_name')
+        department_id = self.request.query_params.get('department_id') or self.request.query_params.get('department')
+        department_name = self.request.query_params.get('department_name')
+        bank_name = self.request.query_params.get('bank_name') or self.request.query_params.get('Bank_name')
         status_filter = self.request.query_params.get('status')
         year = self.request.query_params.get('year')
         month = self.request.query_params.get('month')
+        salary_month = self.request.query_params.get('salary_month')
+        min_net_salary = self.request.query_params.get('min_net_salary')
+        max_net_salary = self.request.query_params.get('max_net_salary')
         
         if employee_id:
             queryset = queryset.filter(employee_id=employee_id)
         if office_id:
             queryset = queryset.filter(employee__office_id=office_id)
+        if office_name:
+            queryset = queryset.filter(employee__office__name__iexact=office_name)
         if department_id:
             queryset = queryset.filter(employee__department_id=department_id)
+        if department_name:
+            queryset = queryset.filter(employee__department__name__iexact=department_name)
+        if bank_name:
+            queryset = queryset.filter(Bank_name__iexact=bank_name)
         if status_filter:
             queryset = queryset.filter(status=status_filter)
+        if salary_month:
+            queryset = queryset.filter(salary_month=salary_month)
         if year:
             queryset = queryset.filter(salary_month__year=year)
         if month:
             queryset = queryset.filter(salary_month__month=month)
+        if min_net_salary:
+            queryset = queryset.filter(net_salary__gte=min_net_salary)
+        if max_net_salary:
+            queryset = queryset.filter(net_salary__lte=max_net_salary)
 
         return queryset
+
+    def list(self, request, *args, **kwargs):
+        response = super().list(request, *args, **kwargs)
+
+        if isinstance(response.data, dict):
+            base_queryset = self.filter_queryset(self.get_queryset())
+            response.data['filter_options'] = {
+                'offices': list(
+                    base_queryset
+                    .exclude(employee__office__isnull=True)
+                    .values('employee__office_id', 'employee__office__name')
+                    .distinct()
+                    .order_by('employee__office__name')
+                ),
+                'departments': list(
+                    base_queryset
+                    .exclude(employee__department__isnull=True)
+                    .values('employee__department_id', 'employee__department__name')
+                    .distinct()
+                    .order_by('employee__department__name')
+                ),
+                'banks': list(
+                    base_queryset
+                    .exclude(Bank_name__isnull=True)
+                    .exclude(Bank_name='')
+                    .values_list('Bank_name', flat=True)
+                    .distinct()
+                    .order_by('Bank_name')
+                ),
+                'statuses': [
+                    {'value': value, 'label': label}
+                    for value, label in Salary.SALARY_STATUS_CHOICES
+                ],
+            }
+
+        return response
 
     def perform_create(self, serializer):
         """Create salary with current user as creator (Admin/Manager/Accountant only)"""

@@ -180,11 +180,15 @@ class CustomUserSerializer(serializers.ModelSerializer):
 
     def get_has_resignation(self, obj):
         """Check if the user has a pending or approved resignation"""
+        if hasattr(obj, 'has_active_resignation'):
+            return obj.has_active_resignation
         from .models import Resignation
         return Resignation.objects.filter(user=obj, status__in=['pending', 'approved']).exists()
 
     def get_resignation_status(self, obj):
         """Get the current resignation status of the user"""
+        if hasattr(obj, 'latest_resignation_status'):
+            return obj.latest_resignation_status
         from .models import Resignation
         latest_resignation = Resignation.objects.filter(user=obj).order_by('-created_at').first()
         return latest_resignation.status if latest_resignation else None
@@ -242,6 +246,63 @@ class CustomUserSerializer(serializers.ModelSerializer):
             instance.set_password(password)
         instance.save()
         return instance
+
+
+class CustomUserListSerializer(serializers.ModelSerializer):
+    """Lean serializer for users table/list endpoints."""
+    office_name = serializers.CharField(source='office.name', read_only=True)
+    department_name = serializers.CharField(source='department.name', read_only=True)
+    designation_name = serializers.CharField(source='designation.name', read_only=True)
+    full_name = serializers.SerializerMethodField()
+    profile_picture_url = serializers.SerializerMethodField()
+    has_resignation = serializers.SerializerMethodField()
+    resignation_status = serializers.SerializerMethodField()
+
+    class Meta:
+        model = CustomUser
+        fields = [
+            'id',
+            'username',
+            'email',
+            'first_name',
+            'last_name',
+            'full_name',
+            'role',
+            'employee_id',
+            'biometric_id',
+            'phone',
+            'profile_picture',
+            'profile_picture_url',
+            'office',
+            'office_name',
+            'department',
+            'department_name',
+            'designation',
+            'designation_name',
+            'joining_date',
+            'salary',
+            'pay_bank_name',
+            'is_active',
+            'has_resignation',
+            'resignation_status',
+        ]
+
+    def get_full_name(self, obj):
+        return obj.get_full_name()
+
+    def get_profile_picture_url(self, obj):
+        if obj.profile_picture:
+            request = self.context.get('request')
+            if request:
+                return request.build_absolute_uri(obj.profile_picture.url)
+            return obj.profile_picture.url
+        return None
+
+    def get_has_resignation(self, obj):
+        return bool(getattr(obj, 'has_active_resignation', False))
+
+    def get_resignation_status(self, obj):
+        return getattr(obj, 'latest_resignation_status', None)
 
 
 class UserRegistrationSerializer(serializers.ModelSerializer):

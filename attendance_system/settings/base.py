@@ -48,6 +48,7 @@ DJANGO_APPS = [
 THIRD_PARTY_APPS = [
     'rest_framework',
     'rest_framework_simplejwt',
+    'rest_framework_simplejwt.token_blacklist',
     'corsheaders',
     'channels',
 ]
@@ -186,14 +187,19 @@ REST_FRAMEWORK = {
         'rest_framework.parsers.MultiPartParser',
     ],
     'EXCEPTION_HANDLER': 'core.exception_handlers.custom_exception_handler',
+    'DEFAULT_THROTTLE_RATES': {
+        'auth_login': os.environ.get('AUTH_LOGIN_THROTTLE_RATE', '10/min'),
+        'auth_refresh': os.environ.get('AUTH_REFRESH_THROTTLE_RATE', '30/min'),
+        'auth_logout': os.environ.get('AUTH_LOGOUT_THROTTLE_RATE', '30/min'),
+    },
 }
 
 # =============================================================================
 # JWT CONFIGURATION
 # =============================================================================
 SIMPLE_JWT = {
-    'ACCESS_TOKEN_LIFETIME': timedelta(hours=1),
-    'REFRESH_TOKEN_LIFETIME': timedelta(days=7),
+    'ACCESS_TOKEN_LIFETIME': timedelta(minutes=30),
+    'REFRESH_TOKEN_LIFETIME': timedelta(days=30),
     'ROTATE_REFRESH_TOKENS': True,
     'BLACKLIST_AFTER_ROTATION': True,
     'UPDATE_LAST_LOGIN': False,
@@ -204,6 +210,11 @@ SIMPLE_JWT = {
     'USER_ID_FIELD': 'id',
     'USER_ID_CLAIM': 'user_id',
 }
+
+JWT_REFRESH_COOKIE_SAMESITE = os.environ.get(
+    'JWT_REFRESH_COOKIE_SAMESITE',
+    'Lax' if ENVIRONMENT == 'development' else 'None'
+)
 
 # =============================================================================
 # CORS CONFIGURATION
@@ -219,8 +230,7 @@ CORS_ALLOWED_ORIGINS = [
     
     'http://localhost:5173',
     'http://127.0.0.1:5174',
-    'http://localhost:3000',
-    'http://127.0.0.1:3000',
+   
 ]
 CORS_ALLOWED_ORIGIN_REGEXES = [
     r"^https://.*\.dishaonlinesolution\.in$",
@@ -328,6 +338,45 @@ CACHES = {
         'LOCATION': 'unique-snowflake',
     }
 }
+
+# =============================================================================
+# CHANNELS / WEBSOCKET CONFIGURATION
+# =============================================================================
+REDIS_URL = os.environ.get('REDIS_URL', 'redis://127.0.0.1:6379/1')
+DEFAULT_CHANNEL_LAYER_BACKEND = (
+    'channels.layers.InMemoryChannelLayer'
+    if ENVIRONMENT == 'development'
+    else 'channels_redis.core.RedisChannelLayer'
+)
+CHANNEL_LAYER_BACKEND = os.environ.get('CHANNEL_LAYER_BACKEND', DEFAULT_CHANNEL_LAYER_BACKEND)
+CHANNEL_LAYERS = {
+    'default': {
+        'BACKEND': CHANNEL_LAYER_BACKEND,
+        **({
+            'CONFIG': {
+                'hosts': [REDIS_URL],
+                'capacity': int(os.environ.get('CHANNEL_LAYER_CAPACITY', '1500')),
+                'expiry': int(os.environ.get('CHANNEL_LAYER_EXPIRY', '60')),
+            },
+        } if CHANNEL_LAYER_BACKEND == 'channels_redis.core.RedisChannelLayer' else {}),
+    },
+}
+WEBSOCKET_ALLOWED_ORIGINS = [
+    origin.strip()
+    for origin in os.environ.get(
+        'WEBSOCKET_ALLOWED_ORIGINS',
+        (
+            
+            'https://dosemployees.dishaonlinesolution.in,'
+            'https://dosmanagers.dishaonlinesolution.in,'
+            'https://admindos.dishaonlinesolution.in,'
+            'https://dosaccounts.dishaonlinesolution.in,'
+            'http://localhost:5173,'
+            'http://127.0.0.1:5173'
+        )
+    ).split(',')
+    if origin.strip()
+]
 
 # =============================================================================
 # APPLICATION-SPECIFIC SETTINGS

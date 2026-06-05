@@ -81,24 +81,15 @@ class DisableTrailingSlashMiddleware:
         return response
 
 class APIAuthenticationDebugMiddleware:
-    """Middleware to debug API authentication issues"""
+    """Lightweight API auth logging without sensitive headers."""
     
     def __init__(self, get_response):
         self.get_response = get_response
     
     def __call__(self, request):
-        # Skip authentication debug for login/register endpoints
-        if request.path.startswith('/api/') and not request.path in ['/api/auth/login/', '/api/auth/register/']:
-            logger.debug(f"API Request: {request.method} {request.path}")
-            logger.debug(f"Authorization Header: {request.headers.get('Authorization', 'Not present')}")
-            logger.debug(f"HTTP_AUTHORIZATION: {request.META.get('HTTP_AUTHORIZATION', 'Not present')}")
-            logger.debug(f"All Headers: {dict(request.headers)}")
-        
         response = self.get_response(request)
-        
-        # Debug response for API requests (except login/register)
-        if request.path.startswith('/api/') and not request.path in ['/api/auth/login/', '/api/auth/register/']:
-            logger.debug(f"API Response: {response.status_code} for {request.path}")
+        if request.path.startswith('/api/') and response.status_code == 401:
+            logger.info("API auth rejected: %s %s", request.method, request.path)
         
         return response
 

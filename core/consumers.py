@@ -1,8 +1,10 @@
 import json
+import logging
 from channels.generic.websocket import AsyncWebsocketConsumer
 from channels.db import database_sync_to_async
-from django.contrib.auth.models import AnonymousUser
-from .models import Attendance, CustomUser
+from .models import Attendance
+
+logger = logging.getLogger(__name__)
 
 
 class AttendanceConsumer(AsyncWebsocketConsumer):
@@ -13,7 +15,11 @@ class AttendanceConsumer(AsyncWebsocketConsumer):
     
     async def connect(self):
         """Handle WebSocket connection"""
-        # Accept the connection
+        user = self.scope.get("user")
+        if not user or not user.is_authenticated:
+            await self.close(code=4401)
+            return
+
         await self.accept()
         
         # Join the attendance group (all clients receive updates)
@@ -22,7 +28,7 @@ class AttendanceConsumer(AsyncWebsocketConsumer):
             self.channel_name
         )
         
-        print(f"WebSocket connected: {self.channel_name}")
+        logger.info("Attendance WebSocket connected: user_id=%s channel=%s", user.id, self.channel_name)
         
         # Send initial connection confirmation
         await self.send(text_data=json.dumps({
@@ -37,7 +43,7 @@ class AttendanceConsumer(AsyncWebsocketConsumer):
             "attendance_updates",
             self.channel_name
         )
-        print(f"WebSocket disconnected: {self.channel_name}")
+        logger.info("Attendance WebSocket disconnected: channel=%s code=%s", self.channel_name, close_code)
     
     async def receive(self, text_data):
         """Handle incoming WebSocket messages"""
@@ -60,9 +66,9 @@ class AttendanceConsumer(AsyncWebsocketConsumer):
                 }))
                 
         except json.JSONDecodeError:
-            print("Invalid JSON received")
+            logger.warning("Invalid JSON received on attendance WebSocket")
         except Exception as e:
-            print(f"Error processing message: {e}")
+            logger.warning("Error processing attendance WebSocket message: %s", e)
     
     async def attendance_update(self, event):
         """Send attendance update to WebSocket"""
@@ -100,7 +106,7 @@ class AttendanceConsumer(AsyncWebsocketConsumer):
             
             return attendance_data
         except Exception as e:
-            print(f"Error fetching latest attendance: {e}")
+            logger.warning("Error fetching latest attendance for WebSocket: %s", e)
             return []
 
 
@@ -151,7 +157,11 @@ class ResignationConsumer(AsyncWebsocketConsumer):
     
     async def connect(self):
         """Handle WebSocket connection"""
-        # Accept the connection
+        user = self.scope.get("user")
+        if not user or not user.is_authenticated:
+            await self.close(code=4401)
+            return
+
         await self.accept()
         
         # Join the resignation group (all clients receive updates)
@@ -160,7 +170,7 @@ class ResignationConsumer(AsyncWebsocketConsumer):
             self.channel_name
         )
         
-        print(f"Resignation WebSocket connected: {self.channel_name}")
+        logger.info("Resignation WebSocket connected: user_id=%s channel=%s", user.id, self.channel_name)
         
         # Send initial connection confirmation
         await self.send(text_data=json.dumps({
@@ -175,7 +185,7 @@ class ResignationConsumer(AsyncWebsocketConsumer):
             "resignation_updates",
             self.channel_name
         )
-        print(f"Resignation WebSocket disconnected: {self.channel_name}")
+        logger.info("Resignation WebSocket disconnected: channel=%s code=%s", self.channel_name, close_code)
     
     async def receive(self, text_data):
         """Handle incoming WebSocket messages"""
@@ -198,9 +208,9 @@ class ResignationConsumer(AsyncWebsocketConsumer):
                 }))
                 
         except json.JSONDecodeError:
-            print("Invalid JSON received in resignation consumer")
+            logger.warning("Invalid JSON received on resignation WebSocket")
         except Exception as e:
-            print(f"Error processing resignation message: {e}")
+            logger.warning("Error processing resignation WebSocket message: %s", e)
     
     async def resignation_update(self, event):
         """Send resignation update to WebSocket"""
@@ -242,7 +252,7 @@ class ResignationConsumer(AsyncWebsocketConsumer):
             
             return resignation_data
         except Exception as e:
-            print(f"Error fetching latest resignations: {e}")
+            logger.warning("Error fetching latest resignations for WebSocket: %s", e)
             return []
 
 

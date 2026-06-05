@@ -2,9 +2,9 @@ from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from rest_framework_simplejwt.views import (
     TokenObtainPairView,
-    TokenRefreshView,
     TokenVerifyView,
 )
+from .auth_views import CookieTokenRefreshView, LogoutView
 from .views import (
     OfficeViewSet,
     CustomUserViewSet,
@@ -110,12 +110,13 @@ urlpatterns = [
     
     # JWT authentication endpoints
     path('api/token/', TokenObtainPairView.as_view(), name='token_obtain_pair'),
-    path('api/token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
+    path('api/token/refresh/', CookieTokenRefreshView.as_view(), name='token_refresh'),
     path('api/token/verify/', TokenVerifyView.as_view(), name='token_verify'),
     
     # Custom authentication endpoints
     path('api/auth/login/', CustomUserViewSet.as_view({'post': 'login'}), name='login'),
     path('api/auth/register/', CustomUserViewSet.as_view({'post': 'register'}), name='register'),
+    path('api/auth/logout/', LogoutView.as_view(), name='logout'),
     path('api/auth/profile/', CustomUserViewSet.as_view({'get': 'profile', 'patch': 'update_profile'}), name='profile'),
     path('api/auth/profile/update/', CustomUserViewSet.as_view({'put': 'update_profile', 'patch': 'update_profile'}), name='update_profile'),
     path('api/auth/profile/upload_upi_qr/', CustomUserViewSet.as_view({'post': 'upload_upi_qr'}), name='upload_upi_qr'),

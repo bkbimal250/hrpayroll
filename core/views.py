@@ -8,7 +8,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
-from django.db.models import Sum, Count, Q
+from django.db.models import Sum, Count, Q, Exists, OuterRef, Subquery
 from django.db import models, transaction, IntegrityError
 from datetime import datetime, timedelta, date
 import calendar
@@ -25,7 +25,7 @@ from .models import (
     Shift, EmployeeShiftAssignment
 )
 from .serializers import (
-    CustomUserSerializer, OfficeSerializer, DeviceSerializer, DeviceUserSerializer,
+    CustomUserSerializer, CustomUserListSerializer, OfficeSerializer, DeviceSerializer, DeviceUserSerializer,
     DeviceUserCreateSerializer, DeviceUserMappingSerializer, DeviceUserBulkCreateSerializer,
     AttendanceSerializer, AttendanceCreateSerializer, BulkAttendanceSerializer, WorkingHoursSettingsSerializer,
     ESSLAttendanceLogSerializer, LeaveSerializer, LeaveCreateSerializer, LeaveApprovalSerializer,
@@ -40,6 +40,9 @@ from .serializers import (
 # Permissions are defined inline in this file
 from .zkteco_service import zkteco_service
 from .db_manager import DatabaseConnectionManager
+from .auth_logging import log_auth_event
+from .auth_views import set_refresh_cookie
+from .throttles import AuthLoginThrottle
 
 logger = logging.getLogger(__name__)
 
@@ -921,6 +924,16 @@ class CustomUserViewSet(viewsets.ModelViewSet):
     ordering_fields = ['username', 'first_name', 'last_name', 'created_at']
     filterset_class = CustomUserFilter
     parser_classes = [MultiPartParser, FormParser, JSONParser]
+
+    def get_throttles(self):
+        if self.action in ['login', 'register']:
+            return [AuthLoginThrottle()]
+        return super().get_throttles()
+
+    def get_serializer_class(self):
+        if self.action == 'list':
+            return CustomUserListSerializer
+        return CustomUserSerializer
     
     def get_queryset(self):
         user = self.request.user
@@ -951,7 +964,42 @@ class CustomUserViewSet(viewsets.ModelViewSet):
             queryset = queryset.filter(id=user.id)
             logger.info("CustomUserViewSet.get_queryset - Employee: returning only self")
         
-        logger.info(f"CustomUserViewSet.get_queryset - Final queryset count: {queryset.count()}")
+        if self.action == 'list':
+            active_resignations = Resignation.objects.filter(
+                user=OuterRef('pk'),
+                status__in=['pending', 'approved']
+            )
+            latest_resignation_status = Resignation.objects.filter(
+                user=OuterRef('pk')
+            ).order_by('-created_at').values('status')[:1]
+
+            queryset = queryset.annotate(
+                has_active_resignation=Exists(active_resignations),
+                latest_resignation_status=Subquery(latest_resignation_status),
+            ).only(
+                'id',
+                'username',
+                'email',
+                'first_name',
+                'last_name',
+                'role',
+                'employee_id',
+                'biometric_id',
+                'phone',
+                'profile_picture',
+                'office',
+                'office__name',
+                'department',
+                'department__name',
+                'designation',
+                'designation__name',
+                'joining_date',
+                'salary',
+                'pay_bank_name',
+                'is_active',
+            )
+
+        logger.debug("CustomUserViewSet.get_queryset - Final queryset prepared")
         return queryset
 
     def get_permissions(self):
@@ -970,11 +1018,15 @@ class CustomUserViewSet(viewsets.ModelViewSet):
         if serializer.is_valid():
             user = serializer.save()
             refresh = RefreshToken.for_user(user)
-            return Response({
+            response = Response({
                 'user': CustomUserSerializer(user).data,
                 'refresh': str(refresh),
                 'access': str(refresh.access_token),
             }, status=status.HTTP_201_CREATED)
+            set_refresh_cookie(response, str(refresh))
+            log_auth_event("LOGIN_SUCCESS", request=request, user=user, action="register")
+            return response
+        log_auth_event("LOGIN_FAILED", request=request, action="register")
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
     @action(detail=False, methods=['post'])
@@ -995,16 +1047,21 @@ class CustomUserViewSet(viewsets.ModelViewSet):
                     'error': 'Access denied. Manager dashboard is only for manager users.'
                 }, status=status.HTTP_403_FORBIDDEN)
             elif dashboard_type == 'employee' and user.role != 'employee':
+                log_auth_event("LOGIN_FAILED", request=request, user=user, reason="dashboard_access_denied")
                 return Response({
                     'error': 'Access denied. Employee dashboard is only for employee users.'
                 }, status=status.HTTP_403_FORBIDDEN)
             
             refresh = RefreshToken.for_user(user)
-            return Response({
+            response = Response({
                 'user': CustomUserSerializer(user).data,
                 'refresh': str(refresh),
                 'access': str(refresh.access_token),
             })
+            set_refresh_cookie(response, str(refresh))
+            log_auth_event("LOGIN_SUCCESS", request=request, user=user, dashboard_type=dashboard_type)
+            return response
+        log_auth_event("LOGIN_FAILED", request=request, username=request.data.get("username", ""))
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
     @action(detail=False, methods=['get'])
@@ -1022,15 +1079,13 @@ class CustomUserViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['put', 'patch'], parser_classes=[MultiPartParser, FormParser, JSONParser])
     def update_profile(self, request):
         """Update current user profile"""
-        # Debug logging
-        logger.info(f"Profile update called by user: {request.user}")
-        logger.info(f"Authentication: {request.user.is_authenticated}")
-        logger.info(f"User ID: {request.user.id if request.user.is_authenticated else 'None'}")
-        logger.info(f"Headers: {dict(request.headers)}")
-        logger.info(f"Request data: {request.data}")
-        logger.info(f"META HTTP_AUTHORIZATION: {request.META.get('HTTP_AUTHORIZATION', 'Not present')}")
-        logger.info(f"Request path: {request.path}")
-        logger.info(f"Request method: {request.method}")
+        logger.info(
+            "Profile update requested: user_id=%s authenticated=%s method=%s path=%s",
+            request.user.id if request.user.is_authenticated else None,
+            request.user.is_authenticated,
+            request.method,
+            request.path,
+        )
         
         if not request.user.is_authenticated:
             logger.error("User not authenticated in update_profile")
@@ -1292,10 +1347,7 @@ class CustomUserViewSet(viewsets.ModelViewSet):
             'user_id': str(request.user.id) if request.user.is_authenticated else None,
             'username': request.user.username if request.user.is_authenticated else None,
             'role': request.user.role if request.user.is_authenticated else None,
-            'auth_header': request.headers.get('Authorization'),
-            'http_auth_header': request.META.get('HTTP_AUTHORIZATION'),
-            'all_headers': dict(request.headers),
-            'all_meta': {k: v for k, v in request.META.items() if k.startswith('HTTP_')}
+            'has_auth_header': bool(request.headers.get('Authorization')),
         })
 
     @action(detail=False, methods=['get'])

@@ -11,6 +11,8 @@ from rest_framework.views import exception_handler
 from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.exceptions import APIException
+from rest_framework_simplejwt.exceptions import InvalidToken, TokenError
+from rest_framework.exceptions import AuthenticationFailed, NotAuthenticated
 
 logger = logging.getLogger(__name__)
 
@@ -61,10 +63,19 @@ def custom_exception_handler(exc, context):
     request = context.get('request')
     view = context.get('view')
     
-    # Log the exception
-    logger.error(f"Exception in {view.__class__.__name__ if view else 'Unknown'}: {str(exc)}")
-    logger.error(f"Request: {request.method} {request.path if request else 'Unknown'}")
-    logger.error(f"Traceback: {traceback.format_exc()}")
+    is_normal_auth_failure = isinstance(exc, (InvalidToken, TokenError, AuthenticationFailed, NotAuthenticated))
+
+    if is_normal_auth_failure:
+        logger.warning(
+            "Authentication failure in %s: %s %s",
+            view.__class__.__name__ if view else 'Unknown',
+            request.method if request else 'Unknown',
+            request.path if request else 'Unknown',
+        )
+    else:
+        logger.error(f"Exception in {view.__class__.__name__ if view else 'Unknown'}: {str(exc)}")
+        logger.error(f"Request: {request.method} {request.path if request else 'Unknown'}")
+        logger.error(f"Traceback: {traceback.format_exc()}")
     
     if response is not None:
         # Customize the error response

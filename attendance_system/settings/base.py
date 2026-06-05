@@ -25,7 +25,7 @@ ALLOWED_HOSTS = [
     host.strip()
     for host in os.environ.get(
         'ALLOWED_HOSTS',
-        'dosapi.attendance.dishaonliesolution.workspa.in,localhost,127.0.0.1'
+        'dosapi.attendance.dishaonliesolution.workspa.in,localhost,127.0.0.1,'
     ).split(',')
     if host.strip()
 ]

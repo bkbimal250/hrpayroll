@@ -57,7 +57,7 @@ CORS_ALLOWED_ORIGINS = [
             'https://dosmanagers.dishaonlinesolution.in,'
             'https://admindos.dishaonlinesolution.in,'
             'https://dosaccounts.dishaonlinesolution.in,'
-            'https://hr.hiring.dishaonlinesolution.in'
+            'https://hrhiring.dishaonlinesolution.in'
         )
     ).split(',')
     if origin.strip()
@@ -77,7 +77,7 @@ CSRF_TRUSTED_ORIGINS = [
             'https://dosmanagers.dishaonlinesolution.in,'
             'https://admindos.dishaonlinesolution.in,'
             'https://dosaccounts.dishaonlinesolution.in,'
-            'https://hr.hiring.dishaonlinesolution.in'
+            'https://hrhiring.dishaonlinesolution.in'
         )
     ).split(',')
     if origin.strip()
@@ -116,7 +116,7 @@ WEBSOCKET_ALLOWED_ORIGINS = [
             'https://dosmanagers.dishaonlinesolution.in,'
             'https://admindos.dishaonlinesolution.in,'
             'https://dosaccounts.dishaonlinesolution.in,'
-            'https://hr.hiring.dishaonlinesolution.in'
+            'https://hrhiring.dishaonlinesolution.in'
         )
     ).split(',')
     if origin.strip()

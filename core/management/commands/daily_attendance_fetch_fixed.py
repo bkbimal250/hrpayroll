@@ -18,8 +18,9 @@ django.setup()
 
 from django.core.management.base import BaseCommand
 from django.utils import timezone
-from django.db import transaction, connection, close_old_connections
-from core.models import Device, CustomUser, Attendance
+from django.db import connection, close_old_connections
+from core.attendance_processing import record_raw_punch
+from core.models import Device, Attendance
 
 # Disable signals to prevent Redis broadcasting
 from django.db.models.signals import post_save
@@ -76,6 +77,16 @@ class Command(BaseCommand):
             help='Fetch from specific device by name'
         )
         parser.add_argument(
+            '--start-date',
+            type=str,
+            help='Start date for fetch range (YYYY-MM-DD)'
+        )
+        parser.add_argument(
+            '--end-date',
+            type=str,
+            help='End date for fetch range (YYYY-MM-DD)'
+        )
+        parser.add_argument(
             '--show-summary',
             action='store_true',
             help='Show summary of fetched data'
@@ -105,6 +116,8 @@ class Command(BaseCommand):
         
         days = options['days']
         device_name = options['device']
+        start_date_option = options.get('start_date')
+        end_date_option = options.get('end_date')
         show_summary = options['show_summary']
         limit = options['limit']
         device_timeout = options['device_timeout']
@@ -124,8 +137,25 @@ class Command(BaseCommand):
             return
         
         # Calculate date range
-        end_date = timezone.now()
-        start_date = end_date - timedelta(days=days)
+        if start_date_option and end_date_option:
+            try:
+                start_date = timezone.make_aware(
+                    datetime.strptime(start_date_option, '%Y-%m-%d'),
+                    timezone.get_current_timezone()
+                )
+                end_date = timezone.make_aware(
+                    datetime.strptime(end_date_option, '%Y-%m-%d').replace(hour=23, minute=59, second=59),
+                    timezone.get_current_timezone()
+                )
+                if end_date < start_date:
+                    raise ValueError('End date must be after start date')
+            except ValueError as exc:
+                self.stdout.write(self.style.ERROR(f"Invalid date range: {exc}"))
+                post_save.connect(attendance_saved, sender=Attendance)
+                return
+        else:
+            end_date = timezone.now()
+            start_date = end_date - timedelta(days=days)
         
         self.stdout.write(f"📅 Date range: {start_date.date()} to {end_date.date()}")
         self.stdout.write(f" Processing {len(devices)} devices...\n")
@@ -321,20 +351,16 @@ class Command(BaseCommand):
                 if not hasattr(log, 'user_id') or not hasattr(log, 'timestamp'):
                     continue
                 
-                # Find user by biometric ID
-                user = CustomUser.objects.filter(biometric_id=str(log.user_id)).first()
-                if not user:
-                    continue  # Skip unmapped users
-                
                 # Make timestamp timezone-aware
                 timestamp = log.timestamp
                 if timezone.is_naive(timestamp):
                     timestamp = timezone.make_aware(timestamp, timezone.get_current_timezone())
                 
-                # Save attendance record
-                if self.save_attendance_record(user, timestamp, device):
+                # Save raw punch first, then derive final attendance through shared safety rules.
+                save_result = self.save_attendance_record(log, timestamp, device)
+                if save_result in ['new', 'unmatched']:
                     new_records += 1
-                else:
+                elif save_result == 'duplicate':
                     duplicates += 1
                 
                 processed += 1
@@ -349,64 +375,42 @@ class Command(BaseCommand):
         
         return processed, new_records, duplicates
     
-    def save_attendance_record(self, user, timestamp, device):
-        """Save attendance record with proper check-in/check-out logic"""
+    def save_attendance_record(self, log, timestamp, device):
+        """Save raw punch first, then update final attendance through shared safety rules."""
         try:
             # Ensure database connection is alive
             connection.ensure_connection()
-            
-            with transaction.atomic():
-                # Get or create attendance record for this user and date
-                attendance, created = Attendance.objects.get_or_create(
-                    user=user,
-                    date=timestamp.date(),
-                    defaults={
-                        'check_in_time': timestamp,
-                        'status': 'present',
-                        'device': device
-                    }
+
+            _raw_log, created, result = record_raw_punch(
+                device=device,
+                biometric_id=str(log.user_id),
+                device_user_id=str(getattr(log, 'uid', None) or log.user_id),
+                employee_id=str(getattr(log, 'employee_id', '') or ''),
+                punch_time=timestamp,
+                punch_type='out' if getattr(log, 'status', 0) == 1 else 'in',
+                source='zkteco_fetch',
+                raw_payload={
+                    'user_id': str(log.user_id),
+                    'uid': getattr(log, 'uid', None),
+                    'status': getattr(log, 'status', None),
+                    'timestamp': timestamp.isoformat(),
+                    'source_command': 'daily_attendance_fetch_fixed',
+                },
+            )
+            if result == 'duplicate':
+                return 'duplicate'
+            if result == 'unmatched':
+                self.stdout.write(
+                    self.style.WARNING(
+                        f"   Unmatched biometric ID {log.user_id} on {device.name} at {timestamp.strftime('%Y-%m-%d %H:%M:%S')}"
+                    )
                 )
-                
-                if created:
-                    # First scan of the day - this is the check-in
-                    return True
-                else:
-                    # Update existing record
-                    if attendance.check_in_time:
-                        # Make existing check-in time timezone-aware
-                        check_in_time = attendance.check_in_time
-                        if timezone.is_naive(check_in_time):
-                            check_in_time = timezone.make_aware(check_in_time, timezone.get_current_timezone())
-                        
-                        if timestamp < check_in_time:
-                            # Earlier timestamp - update check-in time
-                            attendance.check_in_time = timestamp
-                            attendance.save()
-                        elif timestamp > check_in_time:
-                            # Later timestamp - update check-out time
-                            if not attendance.check_out_time:
-                                attendance.check_out_time = timestamp
-                                attendance.save()
-                            else:
-                                # Make existing checkout time timezone-aware
-                                existing_checkout = attendance.check_out_time
-                                if timezone.is_naive(existing_checkout):
-                                    existing_checkout = timezone.make_aware(existing_checkout, timezone.get_current_timezone())
-                                
-                                if timestamp > existing_checkout:
-                                    attendance.check_out_time = timestamp
-                                    attendance.save()
-                    else:
-                        # No check-in time exists - this should be the check-in
-                        attendance.check_in_time = timestamp
-                        attendance.status = 'present'
-                        attendance.save()
-                    
-                    return True
+                return 'unmatched'
+            return 'new' if created else 'duplicate'
                     
         except Exception as e:
             self.stdout.write(f"   ⚠️  Error saving record: {str(e)}")
-            return False
+            return 'error'
     
     def show_recent_attendance(self, days):
         """Show summary of recent attendance records"""

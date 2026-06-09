@@ -15,7 +15,9 @@ from .models import (
     CustomUser, Office, Device, DeviceUser, Attendance, Leave, Document, 
     Notification, SystemSettings, AttendanceLog, ESSLAttendanceLog, 
     WorkingHoursSettings, Resignation, DocumentTemplate, GeneratedDocument,
-    Department, Designation, Shift, EmployeeShiftAssignment, BankAccountHistory
+    Department, Designation, Shift, EmployeeShiftAssignment, BankAccountHistory,
+    EmployeeStatusAuditLog, BiometricAssignmentHistory, AttendanceAuditLog,
+    DuplicatePunchAttempt, UnmatchedBiometricPunch
 )
 
 from unfold.admin import ModelAdmin as UnfoldModelAdmin
@@ -212,11 +214,14 @@ class CustomUserAdminForm(UserCreationForm):
 class SafeCustomUserAdmin(BaseUserAdmin, UnfoldModelAdmin):
     form = CustomUserChangeForm
     add_form = CustomUserAdminForm
-    list_display = ['username', 'email', 'first_name', 'last_name', 'role', 'office', 'department_name', 'designation_display', 'pay_bank_name', 'aadhaar_card', 'pan_card', 'is_active', 'last_login']
+    list_display = ['username', 'email', 'first_name', 'last_name', 'role', 'office', 'department_name', 'designation_display', 'employment_status', 'pay_bank_name', 'aadhaar_card', 'pan_card', 'is_active', 'last_login']
     list_filter = ['role', 'office', 'is_active', 'department', 'pay_bank_name', 'created_at']
     search_fields = ['username', 'first_name', 'last_name', 'email', 'employee_id', 'aadhaar_card', 'pan_card', 'pay_bank_name']
     ordering = ['username']
-    readonly_fields = ['id', 'last_login', 'created_at', 'updated_at']
+    readonly_fields = [
+        'id', 'last_login', 'created_at', 'updated_at', 'archived_at',
+        'archived_by', 'status_changed_at', 'status_changed_by'
+    ]
     
     # Define fieldsets to organize the form
     fieldsets = (
@@ -400,6 +405,7 @@ class SafeCustomUserAdmin(BaseUserAdmin, UnfoldModelAdmin):
         ('Personal info', {'fields': ('first_name', 'last_name', 'email', 'phone', 'address', 'date_of_birth', 'gender', 'profile_picture')}),
         ('Government ID', {'fields': ('aadhaar_card', 'pan_card')}),
         ('Employment', {'fields': ('role', 'office', 'employee_id', 'biometric_id', 'joining_date', 'department', 'designation', 'salary', 'pay_bank_name')}),
+        ('Lifecycle Status', {'fields': ('employment_status', 'exit_type', 'resignation_date', 'last_working_date', 'exit_date', 'exit_reason', 'final_settlement_status', 'rehire_eligible', 'archived_at', 'archived_by', 'status_changed_at', 'status_changed_by', 'status_change_remarks')}),
         ('Emergency Contact', {'fields': ('emergency_contact_name', 'emergency_contact_phone', 'emergency_contact_relationship')}),
         ('Bank Details', {'fields': ('account_holder_name', 'bank_name', 'account_number', 'ifsc_code', 'bank_branch_name')}),
         ('Permissions', {'fields': ('is_active', 'is_staff', 'is_superuser', 'groups', 'user_permissions')}),
@@ -815,14 +821,100 @@ class AttendanceLogAdmin(UnfoldModelAdmin):
         return False
 
 
+@admin.register(EmployeeStatusAuditLog)
+class EmployeeStatusAuditLogAdmin(UnfoldModelAdmin):
+    list_display = ['employee', 'old_status', 'new_status', 'changed_by', 'created_at']
+    list_filter = ['old_status', 'new_status', 'created_at']
+    search_fields = ['employee__first_name', 'employee__last_name', 'employee__employee_id', 'changed_by__username', 'reason']
+    ordering = ['-created_at']
+    readonly_fields = ['id', 'employee', 'old_status', 'new_status', 'changed_by', 'reason', 'old_values', 'new_values', 'created_at']
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(BiometricAssignmentHistory)
+class BiometricAssignmentHistoryAdmin(UnfoldModelAdmin):
+    list_display = ['employee', 'old_biometric_id', 'new_biometric_id', 'changed_by', 'created_at']
+    list_filter = ['created_at']
+    search_fields = ['employee__first_name', 'employee__last_name', 'employee__employee_id', 'old_biometric_id', 'new_biometric_id', 'changed_by__username']
+    ordering = ['-created_at']
+    readonly_fields = ['id', 'employee', 'old_biometric_id', 'new_biometric_id', 'changed_by', 'reason', 'created_at']
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
 @admin.register(ESSLAttendanceLog)
 class ESSLAttendanceLogAdmin(UnfoldModelAdmin):
-    list_display = ['biometric_id', 'device', 'user', 'punch_time', 'punch_type', 'is_processed']
-    list_filter = ['device', 'punch_type', 'is_processed', 'created_at']
+    list_display = ['biometric_id', 'device_user_id', 'device', 'user', 'punch_time', 'punch_type', 'source', 'is_processed']
+    list_filter = ['device', 'punch_type', 'source', 'is_processed', 'created_at']
     search_fields = ['biometric_id', 'device__name', 'user__first_name', 'user__last_name']
     ordering = ['-punch_time']
     readonly_fields = ['id', 'created_at']
     list_editable = ['is_processed']
+
+
+@admin.register(DuplicatePunchAttempt)
+class DuplicatePunchAttemptAdmin(UnfoldModelAdmin):
+    list_display = ['biometric_id', 'device_user_id', 'device', 'punch_time', 'punch_type', 'source', 'created_at']
+    list_filter = ['device', 'source', 'created_at']
+    search_fields = ['biometric_id', 'device_user_id', 'device__name']
+    ordering = ['-created_at']
+    readonly_fields = ['id', 'existing_log', 'device', 'biometric_id', 'device_user_id', 'punch_time', 'punch_type', 'source', 'raw_payload', 'created_at']
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(UnmatchedBiometricPunch)
+class UnmatchedBiometricPunchAdmin(UnfoldModelAdmin):
+    list_display = ['biometric_id', 'device_user_id', 'device', 'punch_time', 'reason', 'review_status', 'source']
+    list_filter = ['review_status', 'device', 'source', 'created_at']
+    search_fields = ['biometric_id', 'device_user_id', 'device__name', 'reason']
+    ordering = ['-punch_time']
+    readonly_fields = ['id', 'created_at']
+
+
+@admin.register(AttendanceAuditLog)
+class AttendanceAuditLogAdmin(UnfoldModelAdmin):
+    list_display = ['employee', 'date', 'change_type', 'source', 'was_locked', 'changed_by', 'created_at']
+    list_filter = ['change_type', 'source', 'was_locked', 'created_at']
+    search_fields = ['employee__first_name', 'employee__last_name', 'employee__employee_id', 'changed_by__username', 'reason']
+    ordering = ['-created_at']
+    readonly_fields = [
+        'id', 'attendance', 'employee', 'date', 'old_check_in', 'new_check_in',
+        'old_check_out', 'new_check_out', 'old_status', 'new_status',
+        'old_day_status', 'new_day_status', 'change_type', 'source',
+        'was_locked', 'changed_by', 'reason', 'created_at'
+    ]
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
 
 
 @admin.register(BankAccountHistory)

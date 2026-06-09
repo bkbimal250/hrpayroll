@@ -90,9 +90,37 @@ class CustomUser(AbstractUser):
     """Custom User model with role-based access"""
     ROLE_CHOICES = [
         ('admin', 'Admin'),
+        ('hr', 'HR'),
         ('manager', 'Manager'),
         ('employee', 'Employee'),
         ('accountant', 'Accountant'),
+    ]
+
+    EMPLOYMENT_STATUS_CHOICES = [
+        ('active', 'Active'),
+        ('notice_period', 'Notice Period'),
+        ('resigned', 'Resigned'),
+        ('left', 'Left'),
+        ('terminated', 'Terminated'),
+        ('suspended', 'Suspended'),
+        ('archived', 'Archived'),
+    ]
+
+    EXIT_TYPE_CHOICES = [
+        ('resigned', 'Resigned'),
+        ('left', 'Left'),
+        ('terminated', 'Terminated'),
+        ('absconded', 'Absconded'),
+        ('retirement', 'Retirement'),
+        ('contract_ended', 'Contract Ended'),
+    ]
+
+    FINAL_SETTLEMENT_STATUS_CHOICES = [
+        ('not_started', 'Not Started'),
+        ('pending', 'Pending'),
+        ('in_progress', 'In Progress'),
+        ('completed', 'Completed'),
+        ('on_hold', 'On Hold'),
     ]
     
     GENDER_CHOICES = [
@@ -124,6 +152,43 @@ class CustomUser(AbstractUser):
     designation = models.ForeignKey(Designation, on_delete=models.SET_NULL, null=True, blank=True, related_name='employees', db_column='designation_id')
     salary = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
     pay_bank_name=models.CharField(max_length=200, blank=True, help_text="Bank name for salary payment")
+
+    # Employee lifecycle tracking. is_active remains login/access control only.
+    employment_status = models.CharField(
+        max_length=20,
+        choices=EMPLOYMENT_STATUS_CHOICES,
+        default='active',
+        db_index=True,
+    )
+    exit_type = models.CharField(max_length=20, choices=EXIT_TYPE_CHOICES, null=True, blank=True)
+    resignation_date = models.DateField(null=True, blank=True)
+    last_working_date = models.DateField(null=True, blank=True)
+    exit_date = models.DateField(null=True, blank=True)
+    exit_reason = models.TextField(blank=True)
+    final_settlement_status = models.CharField(
+        max_length=20,
+        choices=FINAL_SETTLEMENT_STATUS_CHOICES,
+        default='not_started',
+        blank=True,
+    )
+    rehire_eligible = models.BooleanField(null=True, blank=True)
+    archived_at = models.DateTimeField(null=True, blank=True)
+    archived_by = models.ForeignKey(
+        'self',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='archived_employees',
+    )
+    status_changed_at = models.DateTimeField(null=True, blank=True)
+    status_changed_by = models.ForeignKey(
+        'self',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='employment_status_changes',
+    )
+    status_change_remarks = models.TextField(blank=True)
     
     # Emergency Contact
     emergency_contact_name = models.CharField(max_length=100, blank=True)
@@ -191,13 +256,12 @@ class CustomUser(AbstractUser):
                 })
 
     def save(self, *args, **kwargs):
-        # Auto-null biometric_id if user is inactive
-        if self.is_active is False and self.biometric_id is not None:
-            self.biometric_id = None
-            if kwargs.get('update_fields') is not None:
-                update_fields = set(kwargs['update_fields'])
-                update_fields.add('biometric_id')
-                kwargs['update_fields'] = list(update_fields)
+        old_biometric_id = None
+        if self.pk:
+            try:
+                old_biometric_id = CustomUser.objects.filter(pk=self.pk).values_list('biometric_id', flat=True).first()
+            except Exception:
+                old_biometric_id = None
 
         # Validation is handled by serializers for API requests. 
         # Forcing clean() here can trigger unhandled ValidationErrors for existing 
@@ -227,6 +291,18 @@ class CustomUser(AbstractUser):
             else:
                 raise
 
+        if old_biometric_id != self.biometric_id:
+            try:
+                BiometricAssignmentHistory.objects.create(
+                    employee=self,
+                    old_biometric_id=old_biometric_id or '',
+                    new_biometric_id=self.biometric_id or '',
+                    changed_by=self.status_changed_by,
+                    reason=self.status_change_remarks or 'Biometric ID changed',
+                )
+            except Exception:
+                pass
+
     @property
     def is_admin(self):
         return self.role == 'admin'
@@ -234,6 +310,10 @@ class CustomUser(AbstractUser):
     @property
     def is_manager(self):
         return self.role == 'manager'
+
+    @property
+    def is_hr(self):
+        return self.role == 'hr'
 
     @property
     def is_employee(self):
@@ -253,6 +333,116 @@ class CustomUser(AbstractUser):
             return self.last_name
         else:
             return self.email or "Unknown User"
+
+    def set_employment_status(self, new_status, changed_by=None, remarks='', **extra_fields):
+        """Change employment lifecycle status and keep an audit trail."""
+        old_status = self.employment_status
+        old_values = {
+            'employment_status': old_status,
+            'is_active': self.is_active,
+            'exit_type': self.exit_type,
+            'resignation_date': self.resignation_date.isoformat() if self.resignation_date else None,
+            'last_working_date': self.last_working_date.isoformat() if self.last_working_date else None,
+            'exit_date': self.exit_date.isoformat() if self.exit_date else None,
+        }
+
+        self.employment_status = new_status
+        self.status_changed_by = changed_by
+        self.status_changed_at = timezone.now()
+        self.status_change_remarks = remarks or ''
+
+        for field, value in extra_fields.items():
+            if hasattr(self, field):
+                setattr(self, field, value)
+
+        if new_status == 'archived' and not self.archived_at:
+            self.archived_at = timezone.now()
+            self.archived_by = changed_by
+
+        self.save()
+
+        new_values = {
+            'employment_status': self.employment_status,
+            'is_active': self.is_active,
+            'exit_type': self.exit_type,
+            'resignation_date': self.resignation_date.isoformat() if self.resignation_date else None,
+            'last_working_date': self.last_working_date.isoformat() if self.last_working_date else None,
+            'exit_date': self.exit_date.isoformat() if self.exit_date else None,
+        }
+
+        EmployeeStatusAuditLog.objects.create(
+            employee=self,
+            old_status=old_status,
+            new_status=new_status,
+            changed_by=changed_by,
+            reason=remarks or '',
+            old_values=old_values,
+            new_values=new_values,
+        )
+        return self
+
+
+class EmployeeStatusAuditLog(models.Model):
+    """Audit trail for employee lifecycle status changes."""
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    employee = models.ForeignKey(CustomUser, on_delete=models.CASCADE, related_name='status_audit_logs')
+    old_status = models.CharField(max_length=20, blank=True)
+    new_status = models.CharField(max_length=20)
+    changed_by = models.ForeignKey(
+        CustomUser,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='employee_status_audit_changes',
+    )
+    reason = models.TextField(blank=True)
+    old_values = models.JSONField(null=True, blank=True)
+    new_values = models.JSONField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['employee', '-created_at']),
+            models.Index(fields=['new_status', '-created_at']),
+        ]
+
+    def __str__(self):
+        try:
+            return f"{self.employee.get_full_name()}: {self.old_status} -> {self.new_status}"
+        except Exception:
+            return f"Employee status: {self.old_status} -> {self.new_status}"
+
+
+class BiometricAssignmentHistory(models.Model):
+    """Audit trail for biometric ID assignment changes."""
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    employee = models.ForeignKey(CustomUser, on_delete=models.CASCADE, related_name='biometric_assignment_history')
+    old_biometric_id = models.CharField(max_length=50, blank=True)
+    new_biometric_id = models.CharField(max_length=50, blank=True)
+    changed_by = models.ForeignKey(
+        CustomUser,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='biometric_assignment_changes',
+    )
+    reason = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['employee', '-created_at']),
+            models.Index(fields=['old_biometric_id']),
+            models.Index(fields=['new_biometric_id']),
+        ]
+
+    def __str__(self):
+        try:
+            return f"{self.employee.get_full_name()}: {self.old_biometric_id} -> {self.new_biometric_id}"
+        except Exception:
+            return f"Biometric ID: {self.old_biometric_id} -> {self.new_biometric_id}"
 
 
 
@@ -427,6 +617,24 @@ class Attendance(models.Model):
         ('weekend', 'Weekend'),
         ('holiday', 'Holiday'),
     ]
+
+    SOURCE_CHOICES = [
+        ('zkteco_fetch', 'ZKTeco Fetch'),
+        ('zkteco_push', 'ZKTeco Push'),
+        ('manual', 'Manual'),
+        ('import', 'Import'),
+        ('admin_correction', 'Admin Correction'),
+        ('system_recalculation', 'System Recalculation'),
+    ]
+
+    REVIEW_REASON_CHOICES = [
+        ('', 'No Review Needed'),
+        ('missing_checkout', 'Missing Checkout'),
+        ('unmatched_punch', 'Unmatched Punch'),
+        ('duplicate_punch', 'Duplicate Punch'),
+        ('locked_modification', 'Locked Modification'),
+        ('manual_override_preserved', 'Manual Override Preserved'),
+    ]
     
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     user = models.ForeignKey(CustomUser, on_delete=models.CASCADE)
@@ -440,6 +648,14 @@ class Attendance(models.Model):
     late_minutes = models.IntegerField(default=0, help_text="Minutes late from start time")
     device = models.ForeignKey(Device, on_delete=models.SET_NULL, null=True, blank=True)
     notes = models.TextField(blank=True)
+    source = models.CharField(max_length=30, choices=SOURCE_CHOICES, default='system_recalculation', db_index=True)
+    manual_override = models.BooleanField(default=False, db_index=True)
+    needs_review = models.BooleanField(default=False, db_index=True)
+    review_reason = models.CharField(max_length=50, choices=REVIEW_REASON_CHOICES, blank=True, default='')
+    is_locked = models.BooleanField(default=False, db_index=True)
+    locked_at = models.DateTimeField(null=True, blank=True)
+    locked_by = models.ForeignKey(CustomUser, on_delete=models.SET_NULL, null=True, blank=True, related_name='locked_attendance_records')
+    lock_reason = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     
@@ -636,12 +852,14 @@ class Attendance(models.Model):
         
         super().save(*args, **kwargs)
 
-    def manual_update_status(self, new_status, new_day_status=None, notes=None):
+    def manual_update_status(self, new_status, new_day_status=None, notes=None, source='admin_correction'):
         """Manually update attendance status without triggering automatic calculations"""
         # Use Django's update() method to bypass the model's save method
         update_data = {
             'status': new_status,
             'notes': notes if notes is not None else self.notes,
+            'source': source,
+            'manual_override': True,
             'updated_at': timezone.now()
         }
         
@@ -658,6 +876,8 @@ class Attendance(models.Model):
         self.status = update_data['status']
         self.day_status = update_data['day_status']
         self.notes = update_data['notes']
+        self.source = update_data['source']
+        self.manual_override = update_data['manual_override']
         self.updated_at = update_data['updated_at']
         
         # Use update() to bypass the model's save method
@@ -880,27 +1100,133 @@ class AttendanceLog(models.Model):
 
 class ESSLAttendanceLog(models.Model):
     """Raw attendance log from ESSL devices"""
+    SOURCE_CHOICES = Attendance.SOURCE_CHOICES
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    device = models.ForeignKey(Device, on_delete=models.CASCADE)
+    device = models.ForeignKey(Device, on_delete=models.SET_NULL, null=True, blank=True)
     biometric_id = models.CharField(max_length=50)
-    user = models.ForeignKey(CustomUser, on_delete=models.CASCADE, null=True, blank=True)
+    device_user_id = models.CharField(max_length=50, blank=True, db_index=True)
+    user = models.ForeignKey(CustomUser, on_delete=models.SET_NULL, null=True, blank=True)
     punch_time = models.DateTimeField()
     punch_type = models.CharField(max_length=10, choices=[
         ('in', 'Check In'),
         ('out', 'Check Out'),
     ])
+    source = models.CharField(max_length=30, choices=SOURCE_CHOICES, default='zkteco_fetch', db_index=True)
+    raw_payload = models.JSONField(null=True, blank=True)
     is_processed = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         ordering = ['-punch_time']
         indexes = [
+            models.Index(fields=['device', 'biometric_id', 'punch_time']),
             models.Index(fields=['biometric_id', 'punch_time']),
             models.Index(fields=['device', 'punch_time']),
+            models.Index(fields=['source', 'is_processed']),
         ]
 
     def __str__(self):
         return f"{self.biometric_id} - {self.punch_time} ({self.punch_type})"
+
+
+class DuplicatePunchAttempt(models.Model):
+    """Review record for repeated punches received from a device."""
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    existing_log = models.ForeignKey(ESSLAttendanceLog, on_delete=models.SET_NULL, null=True, blank=True, related_name='duplicate_attempts')
+    device = models.ForeignKey(Device, on_delete=models.SET_NULL, null=True, blank=True)
+    biometric_id = models.CharField(max_length=50)
+    device_user_id = models.CharField(max_length=50, blank=True)
+    punch_time = models.DateTimeField()
+    punch_type = models.CharField(max_length=10, blank=True)
+    source = models.CharField(max_length=30, choices=Attendance.SOURCE_CHOICES, default='zkteco_fetch')
+    raw_payload = models.JSONField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['device', 'biometric_id', 'punch_time']),
+            models.Index(fields=['created_at']),
+        ]
+
+    def __str__(self):
+        return f"Duplicate {self.biometric_id} - {self.punch_time}"
+
+
+class UnmatchedBiometricPunch(models.Model):
+    """Device punch that could not be safely mapped to an employee."""
+    REVIEW_STATUS_CHOICES = [
+        ('pending', 'Pending'),
+        ('resolved', 'Resolved'),
+        ('ignored', 'Ignored'),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    device = models.ForeignKey(Device, on_delete=models.SET_NULL, null=True, blank=True)
+    biometric_id = models.CharField(max_length=50)
+    device_user_id = models.CharField(max_length=50, blank=True)
+    punch_time = models.DateTimeField()
+    punch_type = models.CharField(max_length=10, blank=True)
+    source = models.CharField(max_length=30, choices=Attendance.SOURCE_CHOICES, default='zkteco_fetch')
+    raw_payload = models.JSONField(null=True, blank=True)
+    reason = models.CharField(max_length=100, blank=True)
+    review_status = models.CharField(max_length=20, choices=REVIEW_STATUS_CHOICES, default='pending', db_index=True)
+    resolved_user = models.ForeignKey(CustomUser, on_delete=models.SET_NULL, null=True, blank=True, related_name='resolved_biometric_punches')
+    resolved_by = models.ForeignKey(CustomUser, on_delete=models.SET_NULL, null=True, blank=True, related_name='resolved_unmatched_punches')
+    resolved_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-punch_time']
+        indexes = [
+            models.Index(fields=['device', 'biometric_id', 'punch_time']),
+            models.Index(fields=['review_status', 'created_at']),
+        ]
+
+    def __str__(self):
+        return f"Unmatched {self.biometric_id} - {self.punch_time}"
+
+
+class AttendanceAuditLog(models.Model):
+    """Detailed audit trail for manual and locked attendance changes."""
+    CHANGE_TYPE_CHOICES = [
+        ('manual_update', 'Manual Update'),
+        ('admin_correction', 'Admin Correction'),
+        ('locked_modification', 'Locked Modification'),
+        ('locked_modification_attempt', 'Locked Modification Attempt'),
+        ('unlock', 'Unlock'),
+        ('system_recalculation', 'System Recalculation'),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    attendance = models.ForeignKey(Attendance, on_delete=models.SET_NULL, null=True, blank=True, related_name='audit_logs')
+    employee = models.ForeignKey(CustomUser, on_delete=models.SET_NULL, null=True, blank=True, related_name='attendance_audit_logs')
+    date = models.DateField()
+    old_check_in = models.DateTimeField(null=True, blank=True)
+    new_check_in = models.DateTimeField(null=True, blank=True)
+    old_check_out = models.DateTimeField(null=True, blank=True)
+    new_check_out = models.DateTimeField(null=True, blank=True)
+    old_status = models.CharField(max_length=20, blank=True)
+    new_status = models.CharField(max_length=20, blank=True)
+    old_day_status = models.CharField(max_length=20, blank=True)
+    new_day_status = models.CharField(max_length=20, blank=True)
+    change_type = models.CharField(max_length=40, choices=CHANGE_TYPE_CHOICES, default='manual_update')
+    source = models.CharField(max_length=30, choices=Attendance.SOURCE_CHOICES, default='admin_correction')
+    was_locked = models.BooleanField(default=False)
+    changed_by = models.ForeignKey(CustomUser, on_delete=models.SET_NULL, null=True, blank=True, related_name='changed_attendance_audit_logs')
+    reason = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['employee', 'date']),
+            models.Index(fields=['change_type', 'created_at']),
+        ]
+
+    def __str__(self):
+        return f"{self.change_type} - {self.employee} - {self.date}"
 
 
 class WorkingHoursSettings(models.Model):
@@ -1005,7 +1331,7 @@ class Resignation(models.Model):
         null=True, 
         blank=True, 
         related_name='approved_resignations',
-        limit_choices_to={'role__in': ['admin', 'manager']}
+        limit_choices_to={'role__in': ['admin', 'manager', 'hr']}
     )
     approved_at = models.DateTimeField(null=True, blank=True)
     rejection_reason = models.TextField(blank=True, help_text="Reason for rejection if applicable")
@@ -1038,8 +1364,8 @@ class Resignation(models.Model):
             raise ValidationError('Notice period must be either 15 or 30 days.')
         
         # Ensure approved_by is admin or manager
-        if self.approved_by and self.approved_by.role not in ['admin', 'manager']:
-            raise ValidationError('Only admin or manager can approve resignations.')
+        if self.approved_by and self.approved_by.role not in ['admin', 'manager', 'hr']:
+            raise ValidationError('Only admin, manager, or HR can approve resignations.')
         
         # Ensure user is an employee
         if self.user.role != 'employee':
@@ -1185,6 +1511,7 @@ class Salary(models.Model):
         self.calculate_remaining_pay()
         
         super().save(*args, **kwargs)
+        self.lock_attendance_for_payroll()
 
     # Auto-calculated fields (properties)
     @property
@@ -1280,6 +1607,37 @@ class Salary(models.Model):
             # If calculation fails, keep the current worked_days or log error
             print(f"Error calculating worked days for {self.employee}: {e}")
             pass
+
+    def lock_attendance_for_payroll(self):
+        """
+        Lock attendance records for this employee/month after salary generation.
+
+        Half-day payroll behavior is intentionally unchanged: payroll still counts
+        attendance by status='present' exactly as calculate_worked_days_from_attendance()
+        currently does. This lock only protects historical attendance edits.
+        """
+        try:
+            from datetime import datetime, timedelta
+            year = self.salary_month.year
+            month = self.salary_month.month
+            start_date = datetime(year, month, 1).date()
+            if month == 12:
+                end_date = datetime(year + 1, 1, 1).date() - timedelta(days=1)
+            else:
+                end_date = datetime(year, month + 1, 1).date() - timedelta(days=1)
+
+            Attendance.objects.filter(
+                user=self.employee,
+                date__range=[start_date, end_date],
+                is_locked=False,
+            ).update(
+                is_locked=True,
+                locked_at=timezone.now(),
+                locked_by=self.created_by or self.approved_by,
+                lock_reason=f"Salary generated for {self.salary_month.strftime('%B %Y')}",
+            )
+        except Exception as e:
+            print(f"Error locking attendance for salary {self.id}: {e}")
 
     def calculate_remaining_pay(self):
         """Calculate remaining pay after deductions and loan balance"""
@@ -1389,7 +1747,7 @@ class Shift(models.Model):
         null=True, 
         blank=True, 
         related_name='created_shifts',
-        limit_choices_to={'role__in': ['admin', 'manager']}
+        limit_choices_to={'role__in': ['admin', 'manager', 'hr']}
     )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -1415,8 +1773,8 @@ class Shift(models.Model):
             raise ValidationError('Start time must be before end time.')
         
         # Ensure created_by is admin or manager
-        if self.created_by and self.created_by.role not in ['admin', 'manager']:
-            raise ValidationError('Only admin or manager can create shifts.')
+        if self.created_by and self.created_by.role not in ['admin', 'manager', 'hr']:
+            raise ValidationError('Only admin, manager, or HR can create shifts.')
 
     def save(self, *args, **kwargs):
         self.clean()
@@ -1440,7 +1798,7 @@ class EmployeeShiftAssignment(models.Model):
         null=True, 
         blank=True, 
         related_name='assigned_shifts',
-        limit_choices_to={'role__in': ['admin', 'manager']}
+        limit_choices_to={'role__in': ['admin', 'manager', 'hr']}
     )
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -1467,8 +1825,8 @@ class EmployeeShiftAssignment(models.Model):
             raise ValidationError('Only employees can be assigned to shifts.')
         
         # Ensure assigned_by is admin or manager
-        if self.assigned_by and self.assigned_by.role not in ['admin', 'manager']:
-            raise ValidationError('Only admin or manager can assign shifts.')
+        if self.assigned_by and self.assigned_by.role not in ['admin', 'manager', 'hr']:
+            raise ValidationError('Only admin, manager, or HR can assign shifts.')
 
     def save(self, *args, **kwargs):
         self.clean()

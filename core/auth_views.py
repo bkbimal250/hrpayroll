@@ -1,6 +1,6 @@
 from django.conf import settings
 from rest_framework import status
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.exceptions import InvalidToken, TokenError
@@ -62,7 +62,7 @@ class CookieTokenRefreshView(TokenRefreshView):
 
 
 class LogoutView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]
     throttle_classes = [AuthLogoutThrottle]
 
     def post(self, request):
@@ -75,5 +75,9 @@ class LogoutView(APIView):
 
         response = Response({"detail": "Logged out successfully"}, status=status.HTTP_200_OK)
         clear_refresh_cookie(response)
-        log_auth_event("USER_LOGOUT", request=request, user=request.user)
+        log_auth_event(
+            "USER_LOGOUT",
+            request=request,
+            user=request.user if request.user.is_authenticated else None,
+        )
         return response

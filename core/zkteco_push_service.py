@@ -13,6 +13,7 @@ from django.utils import timezone
 from django.db import transaction
 from django.conf import settings
 
+from .attendance_processing import record_raw_punch
 from .models import Device, CustomUser, Attendance, ESSLAttendanceLog
 
 logger = logging.getLogger(__name__)
@@ -117,21 +118,6 @@ class ZKTecoPushService:
                 logger.warning("No user ID or biometric ID found in record")
                 return False
             
-            # Find user
-            user = None
-            if biometric_id:
-                user = CustomUser.objects.filter(biometric_id=str(biometric_id)).first()
-            if not user and user_id:
-                # Try employee_id first
-                user = CustomUser.objects.filter(employee_id=str(user_id)).first()
-                # If not found, try biometric_id with the same value
-                if not user:
-                    user = CustomUser.objects.filter(biometric_id=str(user_id)).first()
-            
-            if not user:
-                logger.warning(f"User not found for ID: {user_id or biometric_id}")
-                return False
-            
             # Extract timestamp
             timestamp_str = record.get('timestamp') or record.get('punch_time') or record.get('time')
             if not timestamp_str:
@@ -175,44 +161,19 @@ class ZKTecoPushService:
                     # Auto-detect based on time
                     punch_type = 'in' if timestamp.hour < 12 else 'out'
             
-            # Get or create attendance record
-            attendance, created = Attendance.objects.get_or_create(
-                user=user,
-                date=timestamp.date(),
-                defaults={
-                    'status': 'present',
-                    'device': device
-                }
+            raw_log, created, result = record_raw_punch(
+                device=device,
+                biometric_id=biometric_id or user_id,
+                device_user_id=user_id or biometric_id,
+                employee_id=user_id,
+                punch_time=timestamp,
+                punch_type=punch_type,
+                source='zkteco_push',
+                raw_payload=record,
             )
-            
-            # Update attendance record
-            updated = False
-            
-            if punch_type in ['in', 'check_in']:
-                if not attendance.check_in_time or timestamp < attendance.check_in_time:
-                    attendance.check_in_time = timestamp
-                    updated = True
-                    logger.info(f"Check-in: {user.get_full_name()} at {timestamp.strftime('%H:%M:%S')}")
-            elif punch_type in ['out', 'check_out']:
-                if not attendance.check_out_time or timestamp > attendance.check_out_time:
-                    attendance.check_out_time = timestamp
-                    updated = True
-                    logger.info(f"Check-out: {user.get_full_name()} at {timestamp.strftime('%H:%M:%S')}")
-            
-            if updated:
-                attendance.device = device
-                attendance.save()
-                
-                # Log the attendance event
-                ESSLAttendanceLog.objects.create(
-                    device=device,
-                    user=user,
-                    timestamp=timestamp,
-                    attendance_type=punch_type,
-                    raw_data=json.dumps(record)
-                )
-            
-            return True
+            if result == 'unmatched':
+                logger.warning(f"Unmatched ZKTeco push punch for ID: {user_id or biometric_id}")
+            return result in ['processed', 'duplicate', 'unmatched']
             
         except Exception as e:
             logger.error(f"Error processing single record: {str(e)}")

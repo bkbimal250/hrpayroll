@@ -79,11 +79,14 @@ def create_document_notification(sender, instance, created, **kwargs):
 def create_welcome_notification(sender, instance, created, **kwargs):
     """Create welcome notification for new users"""
     if created:
-        RoleBasedNotificationService.create_role_notification(
-            instance,
-            'user_registered' if instance.role == 'admin' else 'system_alert',
-            user_name=instance.get_full_name()
-        )
+        try:
+            # Notify admins and HR about the new user registration
+            RoleBasedNotificationService.notify_admins_about_system(
+                'user_registered',
+                user_name=instance.get_full_name()
+            )
+        except Exception as e:
+            logger.error(f"Error creating welcome notification for {instance.get_full_name()}: {e}")
 
 
 @receiver(post_save, sender=Resignation)

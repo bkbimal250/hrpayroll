@@ -82,6 +82,7 @@ class EmailNotificationService:
         """Get dashboard URL based on user role"""
         dashboard_urls = {
             'admin': 'https://admindos.dishaonlinesolution.in',
+            'hr': getattr(settings, 'HR_DASHBOARD_URL', 'https://doshr.dishaonlinesolution.in'),
             'manager': 'https://dosmanagers.dishaonlinesolution.in',
             'employee': 'https://dosemployees.dishaonlinesolution.in',
             'accountant': 'https://dosaccounts.dishaonlinesolution.in/dashboard',

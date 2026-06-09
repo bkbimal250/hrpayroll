@@ -106,6 +106,7 @@ app_name = 'core'
 urlpatterns = [
     # API endpoints
     path('api/', include(router.urls)),
+    path('api/interview/', include('interviewapp.urls')),
     
     
     # JWT authentication endpoints

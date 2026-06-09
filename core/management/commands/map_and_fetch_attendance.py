@@ -16,6 +16,7 @@ from django.db import transaction
 from django.contrib.auth.hashers import make_password
 from django.utils import timezone
 
+from core.attendance_processing import record_raw_punch
 from core.models import Device, DeviceUser, CustomUser, Attendance, ESSLAttendanceLog, Office, Department, Designation
 from core.zkteco_service_improved import improved_zkteco_service
 
@@ -495,36 +496,17 @@ class Command(BaseCommand):
                     error_count += 1
                     continue
                 
-                # Create or update attendance record
-                attendance, created = Attendance.objects.get_or_create(
-                    user=system_user,
-                    date=user_data['date'],
-                    defaults={
-                        'check_in_time': check_in_time,
-                        'check_out_time': check_out_time,
-                        'device': device,
-                        'status': 'present' if check_in_time else 'absent'
-                    }
-                )
-                
-                if not created:
-                    # Update existing record
-                    attendance.check_in_time = check_in_time or attendance.check_in_time
-                    attendance.check_out_time = check_out_time or attendance.check_out_time
-                    attendance.device = device
-                    attendance.save()
-                
-                # Create ESSLAttendanceLog record for raw data
+                # Store raw punches first; final Attendance is recalculated from raw logs.
                 for log in user_data['logs']:
-                    ESSLAttendanceLog.objects.get_or_create(
+                    record_raw_punch(
                         device=device,
                         biometric_id=user_data['user_id'],
+                        device_user_id=user_data['user_id'],
+                        employee_id=str(system_user.employee_id or ''),
                         punch_time=log['punch_time'],
-                        defaults={
-                            'user': system_user,
-                            'punch_type': log['punch_type'],
-                            'is_processed': True
-                        }
+                        punch_type=log['punch_type'],
+                        source='zkteco_fetch',
+                        raw_payload=log,
                     )
                 
                 processed_count += 1

@@ -4,6 +4,25 @@ DEBUG = True
 
 ALLOWED_HOSTS = ['*']
 
+LOCAL_DEV_ORIGINS = [
+    'http://localhost:5173',
+    'http://localhost:5174',
+    'http://localhost:5175',
+    'http://127.0.0.1:5173',
+    'http://127.0.0.1:5174',
+    'http://127.0.0.1:5175',
+]
+
+CSRF_TRUSTED_ORIGINS = list(dict.fromkeys(CSRF_TRUSTED_ORIGINS + LOCAL_DEV_ORIGINS))
+CORS_ALLOWED_ORIGINS = list(dict.fromkeys(CORS_ALLOWED_ORIGINS + LOCAL_DEV_ORIGINS))
+
+REST_FRAMEWORK = {
+    **REST_FRAMEWORK,
+    'DEFAULT_AUTHENTICATION_CLASSES': [
+        'core.authentication.CustomJWTAuthentication',
+    ],
+}
+
 # Database configuration for development
 DATABASES = {
     'default': {

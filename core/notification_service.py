@@ -3,11 +3,20 @@ Notification Service for managing system notifications
 """
 from django.utils import timezone
 from django.db.models import Q
+from django.conf import settings
 from datetime import timedelta
 from .models import Notification, CustomUser, Attendance, Leave, Resignation, Document
 import logging
 
 logger = logging.getLogger(__name__)
+
+
+def notification_emails_enabled():
+    """Send notification emails only in the production environment."""
+    return (
+        getattr(settings, 'ENVIRONMENT', 'development') == 'production'
+        and not getattr(settings, 'DEBUG', True)
+    )
 
 
 class NotificationService:
@@ -54,8 +63,12 @@ class NotificationService:
             
             logger.info(f"Created notification: {title} for user {user.get_full_name()}")
             
-            # Send email notification if requested and user has email (only for active users)
-            if send_email and user.email and user.is_active:
+            # Send email notification only in production, if requested and user has email.
+            if send_email and not notification_emails_enabled():
+                logger.info(
+                    f"Skipping notification email outside production: {title} for user {user.get_full_name()}"
+                )
+            elif send_email and user.email and user.is_active:
                 from .email_service import EmailNotificationService
                 if priority == 'urgent':
                     EmailNotificationService.send_urgent_notification_email(notification)
@@ -262,6 +275,43 @@ class RoleBasedNotificationService:
                 'priority': 'high'
             }
         },
+        'hr': {
+            'leave_request': {
+                'title': 'New Leave Request',
+                'message': '{employee_name} has submitted a leave request.',
+                'type': 'leave',
+                'category': 'info',
+                'priority': 'medium'
+            },
+            'resignation_request': {
+                'title': 'Resignation Request',
+                'message': '{employee_name} has submitted a resignation request.',
+                'type': 'resignation',
+                'category': 'warning',
+                'priority': 'high'
+            },
+            'document_generated': {
+                'title': 'Document Generated',
+                'message': 'New document has been generated for {employee_name}.',
+                'type': 'document',
+                'category': 'success',
+                'priority': 'low'
+            },
+            'user_registered': {
+                'title': 'New User Registered',
+                'message': 'New user {user_name} has been registered.',
+                'type': 'system',
+                'category': 'info',
+                'priority': 'low'
+            },
+            'system_alert': {
+                'title': 'System Alert',
+                'message': 'System requires attention: {message}',
+                'type': 'system',
+                'category': 'error',
+                'priority': 'urgent'
+            }
+        },
         'admin': {
             'system_alert': {
                 'title': 'System Alert',
@@ -327,20 +377,21 @@ class RoleBasedNotificationService:
             notification_type=template['type'],
             category=template['category'],
             priority=template['priority'],
-            created_by=kwargs.get('created_by')
+            created_by=kwargs.get('created_by'),
+            send_email=kwargs.get('send_email', True)
         )
     
     @staticmethod
     def notify_managers_about_employee(employee, template_key, **kwargs):
-        """Notify managers about employee-related events"""
-        if not employee.office:
-            return []
-        
-        managers = CustomUser.objects.filter(
-            office=employee.office,
-            role='manager',
-            is_active=True
-        )
+        """Notify managers and HR about employee-related events."""
+        managers = CustomUser.objects.none()
+        if employee.office:
+            managers = CustomUser.objects.filter(
+                office=employee.office,
+                role='manager',
+                is_active=True
+            )
+        hr_users = CustomUser.objects.filter(role='hr', is_active=True)
         
         notifications = []
         for manager in managers:
@@ -349,14 +400,21 @@ class RoleBasedNotificationService:
             )
             if notification:
                 notifications.append(notification)
+
+        for hr_user in hr_users:
+            notification = RoleBasedNotificationService.create_role_notification(
+                hr_user, template_key, employee_name=employee.get_full_name(), **kwargs
+            )
+            if notification:
+                notifications.append(notification)
         
         return notifications
     
     @staticmethod
     def notify_admins_about_system(template_key, **kwargs):
-        """Notify admins about system events"""
+        """Notify admins and HR about system events."""
         admins = CustomUser.objects.filter(
-            role='admin',
+            role__in=['admin', 'hr'],
             is_active=True
         )
         
@@ -378,7 +436,8 @@ def notify_attendance_late(attendance):
         return RoleBasedNotificationService.create_role_notification(
             attendance.user,
             'attendance_late',
-            late_minutes=attendance.late_minutes
+            late_minutes=attendance.late_minutes,
+            send_email=False
         )
     return None
 
@@ -387,7 +446,8 @@ def notify_employee_absent(attendance):
     if attendance.status == 'absent':
         return RoleBasedNotificationService.notify_managers_about_employee(
             attendance.user,
-            'employee_absent'
+            'employee_absent',
+            send_email=False
         )
     return []
 

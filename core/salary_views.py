@@ -553,6 +553,8 @@ class SalaryReportView(APIView):
         year = data['year']
         month = data['month']
         status_filter = data.get('status')
+        include_inactive = data.get('include_inactive', False)
+        employment_status = data.get('employment_status')
 
         # Build queryset
         from datetime import date
@@ -569,6 +571,10 @@ class SalaryReportView(APIView):
             queryset = queryset.filter(employee__department_id=department_id)
         if status_filter:
             queryset = queryset.filter(status=status_filter)
+        if employment_status:
+            queryset = queryset.filter(employee__employment_status=employment_status)
+        elif not include_inactive:
+            queryset = queryset.filter(employee__employment_status__in=['active', 'notice_period'])
 
         # Role-based filtering
         user = request.user
@@ -582,6 +588,10 @@ class SalaryReportView(APIView):
             queryset = queryset.filter(employee__office=user.office)
         else:
             all_users = User.objects.all()
+        if employment_status:
+            all_users = all_users.filter(employment_status=employment_status)
+        elif not include_inactive:
+            all_users = all_users.filter(employment_status__in=['active', 'notice_period'])
         
         # Calculate statistics
         total_salaries = queryset.count()
@@ -943,13 +953,14 @@ def salary_creation_status(request):
         user = request.user
         # For admin and accountant: get all users (all roles) to create salary for everyone
         # For manager: get employees and managers in their office
+        eligible_statuses = ['active', 'notice_period']
         if user.role == 'admin' or user.role == 'accountant':
-            users = CustomUser.objects.filter(is_active=True)
+            users = CustomUser.objects.filter(employment_status__in=eligible_statuses)
         elif user.role == 'manager':
             # Manager sees employees and managers in their office
             if user.office:
                 users = CustomUser.objects.filter(
-                    is_active=True,
+                    employment_status__in=eligible_statuses,
                     office=user.office,
                     role__in=['employee', 'manager']
                 )
@@ -958,7 +969,7 @@ def salary_creation_status(request):
                 users = CustomUser.objects.none()
         else:
             # Other roles see only employees
-            users = CustomUser.objects.filter(role='employee', is_active=True)
+            users = CustomUser.objects.filter(role='employee', employment_status__in=eligible_statuses)
         
         # Role-based filtering (additional filters if needed)
         if user.role == 'admin' or user.role == 'accountant':

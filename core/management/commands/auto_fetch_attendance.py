@@ -17,7 +17,7 @@ import multiprocessing
 from datetime import datetime, timedelta
 from django.core.management.base import BaseCommand, CommandError
 from django.utils import timezone
-from django.db import transaction, connection, close_old_connections
+from django.db import connection, close_old_connections
 from django.conf import settings
 from django.core.cache import cache
 
@@ -25,7 +25,8 @@ from django.core.cache import cache
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'attendance_system.settings')
 django.setup()
 
-from core.models import Device, CustomUser, Attendance, Office, ESSLAttendanceLog
+from core.attendance_processing import record_raw_punch
+from core.models import Device, Attendance, Office, ESSLAttendanceLog
 
 # Configure logging
 logging.basicConfig(
@@ -46,12 +47,16 @@ except ImportError:
     logger.warning("pyzk library not available. Install with: pip install pyzk")
 
 
-def _run_device_fetch_worker(device_id, result_queue):
+def _run_device_fetch_worker(device_id, result_queue, lookback_hours):
     """Fetch one device in an isolated process so a stuck device cannot block the service."""
     try:
         close_old_connections()
         device = Device.objects.get(id=device_id)
-        service = AutoAttendanceService(interval=0, use_process_isolation=False)
+        service = AutoAttendanceService(
+            interval=0,
+            use_process_isolation=False,
+            lookback_hours=lookback_hours,
+        )
         service._fetch_device_data(device)
         result_queue.put({
             'success': True,
@@ -71,11 +76,19 @@ def _run_device_fetch_worker(device_id, result_queue):
 class AutoAttendanceService:
     """Automatic attendance fetching service with duplicate prevention"""
     
-    def __init__(self, interval=30, max_workers=3, device_timeout=60, use_process_isolation=True):
+    def __init__(
+        self,
+        interval=30,
+        max_workers=3,
+        device_timeout=60,
+        use_process_isolation=True,
+        lookback_hours=24,
+    ):
         self.interval = interval
         self.max_workers = max_workers
         self.device_timeout = device_timeout
         self.use_process_isolation = use_process_isolation
+        self.lookback_hours = lookback_hours
         self.running = False
         self.thread = None
         self.devices = []
@@ -193,7 +206,7 @@ class AutoAttendanceService:
         result_queue = ctx.Queue(maxsize=1)
         process = ctx.Process(
             target=_run_device_fetch_worker,
-            args=(device.id, result_queue),
+            args=(device.id, result_queue, self.lookback_hours),
             daemon=True,
         )
 
@@ -332,38 +345,39 @@ class AutoAttendanceService:
         
         new_records = 0
         duplicates = 0
+        unmatched_users = {}
         
-        # Filter to only process recent records (last 15 days)
-        from datetime import timedelta
-        cutoff_date = timezone.now() - timedelta(days=15)
+        cutoff_date = timezone.now() - timedelta(hours=self.lookback_hours)
+        recent_logs = []
         
         for log in attendance_logs:
             try:
-                # Make timestamp timezone-aware for comparison
                 log_timestamp = log.timestamp
                 if timezone.is_naive(log_timestamp):
                     log_timestamp = timezone.make_aware(log_timestamp, timezone.get_current_timezone())
                 
-                # Skip old records
                 if log_timestamp < cutoff_date:
                     continue
-                    
-                # Create unique hash for this attendance record
-                record_hash = self._create_attendance_hash(device.id, log, log_timestamp)
-                
-                # Check if this record already exists
-                if record_hash in self.last_attendance_hashes.get(device.id, set()):
-                    duplicates += 1
-                    continue
-                    
-                # Process the attendance record
-                if self._save_zkteco_attendance(device, log, log_timestamp):
+
+                recent_logs.append((log, log_timestamp))
+            except Exception as e:
+                logger.error(f"Error reading attendance timestamp from {device.name}: {str(e)}")
+
+        recent_logs.sort(key=lambda item: item[1])
+        logger.info(
+            f"Found {len(recent_logs)} logs from the last {self.lookback_hours} hours on {device.name}"
+        )
+
+        for log, log_timestamp in recent_logs:
+            try:
+                save_result = self._save_zkteco_attendance(device, log, log_timestamp)
+                if save_result == 'saved':
                     new_records += 1
-                    # Add to hash set to prevent future duplicates
-                    if device.id not in self.last_attendance_hashes:
-                        self.last_attendance_hashes[device.id] = set()
-                    self.last_attendance_hashes[device.id].add(record_hash)
-                    
+                elif save_result == 'duplicate':
+                    duplicates += 1
+                elif save_result == 'unmatched':
+                    biometric_id = str(getattr(log, 'user_id', 'unknown'))
+                    unmatched_users[biometric_id] = unmatched_users.get(biometric_id, 0) + 1
             except Exception as e:
                 logger.error(f"Error processing attendance record: {str(e)}")
                 
@@ -371,7 +385,12 @@ class AutoAttendanceService:
         self.stats['total_records'] += new_records
         self.stats['duplicates_prevented'] += duplicates
         
-        logger.info(f"Processed {new_records} new records, prevented {duplicates} duplicates from {device.name}")
+        logger.info(f"Processed {new_records} new records, skipped {duplicates} already-saved scans from {device.name}")
+        if unmatched_users:
+            unmatched_summary = ", ".join(
+                f"{biometric_id} ({count} scans)" for biometric_id, count in sorted(unmatched_users.items())
+            )
+            logger.warning(f"Unmatched biometric IDs on {device.name}: {unmatched_summary}")
         
     def _create_attendance_hash(self, device_id, log, timestamp=None):
         """Create unique hash for attendance record"""
@@ -384,85 +403,41 @@ class AutoAttendanceService:
     def _save_zkteco_attendance(self, device, log, timestamp=None):
         """Save ZKTeco attendance record to database with proper check-in/check-out logic"""
         try:
-            # Find user by biometric ID
-            user = CustomUser.objects.filter(biometric_id=str(log.user_id)).first()
-            if not user:
-                logger.warning(f"User with biometric ID {log.user_id} not found")
-                return False
-                
             # Use provided timestamp or make log.timestamp timezone-aware
             if timestamp is None:
                 timestamp = log.timestamp
                 if timezone.is_naive(timestamp):
                     timestamp = timezone.make_aware(timestamp, timezone.get_current_timezone())
-            
-            # Ensure we're using the same timezone for all comparisons
-            current_tz = timezone.get_current_timezone()
-                
-            # Log every biometric scan for audit purposes
-            logger.info(f"BIOMETRIC SCAN: {user.get_full_name()} (ID: {log.user_id}) scanned at {timestamp.strftime('%H:%M:%S')} on {device.name}")
-                
-            # Get or create attendance record for this user and date
-            attendance, created = Attendance.objects.get_or_create(
-                user=user,
-                date=timestamp.date(),
-                defaults={
-                    'check_in_time': timestamp,
-                    'status': 'present',
-                    'device': device
-                }
+
+            raw_log, created, result = record_raw_punch(
+                device=device,
+                biometric_id=log.user_id,
+                device_user_id=getattr(log, 'uid', None) or log.user_id,
+                employee_id=str(getattr(log, 'employee_id', '') or ''),
+                punch_time=timestamp,
+                punch_type='out' if getattr(log, 'status', 0) == 1 else 'in',
+                source='zkteco_fetch',
+                raw_payload={
+                    'user_id': str(log.user_id),
+                    'uid': getattr(log, 'uid', None),
+                    'status': getattr(log, 'status', None),
+                    'timestamp': timestamp.isoformat(),
+                },
             )
-            
-            if created:
-                # First scan of the day - this is the check-in
-                logger.info(f"FIRST SCAN: Check-in for {user.get_full_name()} at {timestamp.strftime('%H:%M:%S')}")
-            else:
-                # Subsequent scans - determine if this should update check-in or check-out
-                # FIXED LOGIC: Only process if we have a valid check-in time
-                if attendance.check_in_time:
-                    # Ensure check_in_time is timezone-aware for comparison
-                    check_in_time = attendance.check_in_time
-                    if timezone.is_naive(check_in_time):
-                        check_in_time = timezone.make_aware(check_in_time, current_tz)
-                    
-                    if timestamp < check_in_time:
-                        # Earlier timestamp - update check-in time (first scan of the day)
-                        old_checkin = attendance.check_in_time
-                        attendance.check_in_time = timestamp
-                        attendance.save()
-                        logger.info(f"EARLIER SCAN: Updated check-in for {user.get_full_name()} from {old_checkin.strftime('%H:%M:%S')} to {timestamp.strftime('%H:%M:%S')}")
-                    elif timestamp > check_in_time:
-                        # Later timestamp - update check-out time (last scan of the day)
-                        if not attendance.check_out_time:
-                            attendance.check_out_time = timestamp
-                            attendance.save()
-                            logger.info(f"LAST SCAN: Check-out for {user.get_full_name()} at {timestamp.strftime('%H:%M:%S')}")
-                        else:
-                            # Make existing checkout time timezone-aware for comparison
-                            existing_checkout = attendance.check_out_time
-                            if timezone.is_naive(existing_checkout):
-                                existing_checkout = timezone.make_aware(existing_checkout, current_tz)
-                            
-                            if timestamp > existing_checkout:
-                                old_checkout = attendance.check_out_time
-                                attendance.check_out_time = timestamp
-                                attendance.save()
-                                logger.info(f"LATER SCAN: Updated check-out for {user.get_full_name()} from {old_checkout.strftime('%H:%M:%S')} to {timestamp.strftime('%H:%M:%S')}")
-                            else:
-                                # This scan is between check-in and check-out, log it but don't change times
-                                logger.debug(f"MIDDLE SCAN: {user.get_full_name()} scanned at {timestamp.strftime('%H:%M:%S')} (between check-in and check-out)")
-                else:
-                    # No check-in time exists - this should be the check-in
-                    attendance.check_in_time = timestamp
-                    attendance.status = 'present'
-                    attendance.save()
-                    logger.info(f"FIXED: Set check-in for {user.get_full_name()} at {timestamp.strftime('%H:%M:%S')} (was missing check-in)")
-                        
-            return True
+
+            if result == 'unmatched':
+                logger.warning(
+                    f"Unmatched biometric ID {log.user_id} on {device.name} "
+                    f"({device.ip_address}:{device.port}) at {timestamp.strftime('%Y-%m-%d %H:%M:%S')}"
+                )
+                return 'unmatched'
+            if result == 'duplicate':
+                return 'duplicate'
+            return 'saved'
                 
         except Exception as e:
             logger.error(f"Error saving attendance record: {str(e)}")
-            return False
+            return 'error'
             
     def _fetch_essl_data(self, device):
         """Fetch data from ESSL device"""
@@ -487,33 +462,34 @@ class AutoAttendanceService:
         logger.info(f" Processing {len(attendance_data)} ESSL attendance records from {device.name}")
         
         new_records = 0
+        duplicates = 0
+        unmatched_records = 0
         
         for record in attendance_data:
             try:
-                if self._save_essl_attendance(device, record):
+                save_result = self._save_essl_attendance(device, record)
+                if save_result == 'saved':
                     new_records += 1
+                elif save_result == 'duplicate':
+                    duplicates += 1
+                elif save_result == 'unmatched':
+                    unmatched_records += 1
             except Exception as e:
                 logger.error(f"Error processing ESSL attendance record: {str(e)}")
                 
         self.stats['total_records'] += new_records
-        logger.info(f"Processed {new_records} new ESSL records from {device.name}")
+        self.stats['duplicates_prevented'] += duplicates
+        logger.info(
+            f"Processed {new_records} new ESSL records from {device.name}; "
+            f"{duplicates} duplicates skipped, {unmatched_records} unmatched"
+        )
         
     def _save_essl_attendance(self, device, record):
-        """Save ESSL attendance record to database with proper check-in/check-out logic"""
+        """Save ESSL raw punch first, then derive final attendance through shared safety rules."""
         try:
-            # Find user by employee ID or biometric ID
-            user = CustomUser.objects.filter(
-                employee_id=record.get('employee_id')
-            ).first()
-            
-            if not user:
-                logger.warning(f"User with employee ID {record.get('employee_id')} not found")
-                return False
-                
-            # Parse timestamp
             timestamp_str = record.get('timestamp')
             if not timestamp_str:
-                return False
+                return 'error'
                 
             try:
                 timestamp = datetime.fromisoformat(timestamp_str.replace('Z', '+00:00'))
@@ -521,73 +497,45 @@ class AutoAttendanceService:
                     timestamp = timezone.make_aware(timestamp, timezone.get_current_timezone())
             except:
                 logger.error(f"Invalid timestamp format: {timestamp_str}")
-                return False
-                
-            # Get or create attendance record for this user and date
-            attendance, created = Attendance.objects.get_or_create(
-                user=user,
-                date=timestamp.date(),
-                defaults={
-                    'check_in_time': timestamp,
-                    'status': 'present',
-                    'device': device
-                }
+                return 'error'
+
+            biometric_id = str(
+                record.get('biometric_id')
+                or record.get('device_user_id')
+                or record.get('employee_id')
+                or ''
             )
-            
-            if created:
-                # First scan of the day - this is the check-in
-                logger.info(f"FIRST SCAN (ESSL): Check-in for {user.get_full_name()} at {timestamp.strftime('%H:%M:%S')}")
-            else:
-                # Subsequent scans - determine if this should update check-in or check-out
-                # FIXED LOGIC: Only process if we have a valid check-in time
-                if attendance.check_in_time:
-                    # Make timestamp timezone-aware for comparison
-                    if timezone.is_naive(timestamp):
-                        timestamp = timezone.make_aware(timestamp, timezone.get_current_timezone())
-                    
-                    # Make existing check-in time timezone-aware for comparison
-                    existing_checkin = attendance.check_in_time
-                    if timezone.is_naive(existing_checkin):
-                        existing_checkin = timezone.make_aware(existing_checkin, timezone.get_current_timezone())
-                    
-                    if timestamp < existing_checkin:
-                        # Earlier timestamp - update check-in time (first scan of the day)
-                        old_checkin = attendance.check_in_time
-                        attendance.check_in_time = timestamp
-                        attendance.save()
-                        logger.info(f" EARLIER SCAN (ESSL): Updated check-in for {user.get_full_name()} from {old_checkin.strftime('%H:%M:%S')} to {timestamp.strftime('%H:%M:%S')}")
-                    elif timestamp > existing_checkin:
-                        # Later timestamp - update check-out time (last scan of the day)
-                        if not attendance.check_out_time:
-                            attendance.check_out_time = timestamp
-                            attendance.save()
-                            logger.info(f"LAST SCAN (ESSL): Check-out for {user.get_full_name()} at {timestamp.strftime('%H:%M:%S')}")
-                        else:
-                            # Make existing checkout time timezone-aware for comparison
-                            existing_checkout = attendance.check_out_time
-                            if timezone.is_naive(existing_checkout):
-                                existing_checkout = timezone.make_aware(existing_checkout, timezone.get_current_timezone())
-                            
-                            if timestamp > existing_checkout:
-                                old_checkout = attendance.check_out_time
-                                attendance.check_out_time = timestamp
-                                attendance.save()
-                                logger.info(f" LATER SCAN (ESSL): Updated check-out for {user.get_full_name()} from {old_checkout.strftime('%H:%M:%S')} to {timestamp.strftime('%H:%M:%S')}")
-                            else:
-                                # This scan is between check-in and check-out, log it but don't change times
-                                logger.debug(f" MIDDLE SCAN (ESSL): {user.get_full_name()} scanned at {timestamp.strftime('%H:%M:%S')} (between check-in and check-out)")
-                else:
-                    # No check-in time exists - this should be the check-in
-                    attendance.check_in_time = timestamp
-                    attendance.status = 'present'
-                    attendance.save()
-                    logger.info(f"FIXED (ESSL): Set check-in for {user.get_full_name()} at {timestamp.strftime('%H:%M:%S')} (was missing check-in)")
-                        
-            return True
+            if not biometric_id:
+                logger.warning(f"ESSL record missing biometric/device/employee ID at {timestamp_str}")
+                return 'error'
+
+            raw_log, created, result = record_raw_punch(
+                device=device,
+                biometric_id=biometric_id,
+                device_user_id=str(record.get('device_user_id') or biometric_id),
+                employee_id=str(record.get('employee_id') or ''),
+                punch_time=timestamp,
+                punch_type=record.get('punch_type') or record.get('status') or 'in',
+                source='import',
+                raw_payload={
+                    **record,
+                    'source_command': 'auto_fetch_attendance_essl',
+                },
+            )
+
+            if result == 'unmatched':
+                logger.warning(
+                    f"Unmatched ESSL biometric ID {biometric_id} on {device.name} "
+                    f"at {timestamp.strftime('%Y-%m-%d %H:%M:%S')}"
+                )
+                return 'unmatched'
+            if result == 'duplicate':
+                return 'duplicate'
+            return 'saved' if created else 'duplicate'
                 
         except Exception as e:
             logger.error(f"Error saving ESSL attendance record: {str(e)}")
-            return False
+            return 'error'
             
     def _log_stats(self):
         """Log service statistics"""
@@ -624,6 +572,12 @@ class Command(BaseCommand):
             help='Maximum seconds allowed for one device fetch before skipping it (default: 60)'
         )
         parser.add_argument(
+            '--lookback-hours',
+            type=int,
+            default=24,
+            help='Only process device scans from the last N hours (default: 24)'
+        )
+        parser.add_argument(
             '--daemon',
             action='store_true',
             help='Run as daemon process'
@@ -653,15 +607,17 @@ class Command(BaseCommand):
             interval = options['interval']
             daemon = options['daemon']
             device_timeout = options['device_timeout']
+            lookback_hours = options['lookback_hours']
             
             logger.info(
                 f"Starting automatic attendance fetching service with {interval}s interval "
-                f"and {device_timeout}s per-device timeout..."
+                f"{device_timeout}s per-device timeout, and {lookback_hours}h lookback..."
             )
             
             # Initialize service
             auto_attendance_service.interval = interval
             auto_attendance_service.device_timeout = device_timeout
+            auto_attendance_service.lookback_hours = lookback_hours
             auto_attendance_service.start()
             
             if daemon:

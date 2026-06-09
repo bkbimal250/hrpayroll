@@ -11,13 +11,28 @@ class CustomUserFilter(django_filters.FilterSet):
     department = django_filters.CharFilter(method='filter_department')
     role = django_filters.CharFilter(field_name='role')
     is_active = django_filters.BooleanFilter(field_name='is_active')
+    employment_status = django_filters.CharFilter(field_name='employment_status')
+    status = django_filters.CharFilter(method='filter_status')
     search = django_filters.CharFilter(method='filter_search')
     aadhaar_card = django_filters.CharFilter(field_name='aadhaar_card', lookup_expr='icontains')
     pan_card = django_filters.CharFilter(field_name='pan_card', lookup_expr='icontains')
     
     class Meta:
         model = CustomUser
-        fields = ['office', 'department', 'role', 'is_active', 'search', 'aadhaar_card', 'pan_card']
+        fields = [
+            'office', 'department', 'role', 'is_active', 'employment_status',
+            'status', 'search', 'aadhaar_card', 'pan_card'
+        ]
+
+    def filter_status(self, queryset, name, value):
+        """Support legacy active/inactive filters and new lifecycle status values."""
+        if not value:
+            return queryset
+        if value == 'active':
+            return queryset.filter(is_active=True)
+        if value == 'inactive':
+            return queryset.filter(is_active=False)
+        return queryset.filter(employment_status=value)
     
     def filter_office(self, queryset, name, value):
         """Custom office filter to handle null values"""
@@ -236,22 +251,109 @@ class GeneratedDocumentFilter(django_filters.FilterSet):
     """FilterSet for GeneratedDocument"""
     document_type = django_filters.CharFilter(field_name='document_type')
     date = django_filters.DateFilter(field_name='generated_at', lookup_expr='date')
-    employee = django_filters.CharFilter(field_name='employee__id')
-    generated_by = django_filters.CharFilter(field_name='generated_by__id')
-    office = django_filters.CharFilter(field_name='employee__office__id')
+    generated_from = django_filters.DateFilter(field_name='generated_at', lookup_expr='date__gte')
+    generated_to = django_filters.DateFilter(field_name='generated_at', lookup_expr='date__lte')
+    employee = django_filters.CharFilter(method='filter_employee')
+    employee_name = django_filters.CharFilter(method='filter_employee_name')
+    employee_id = django_filters.CharFilter(field_name='employee__employee_id', lookup_expr='icontains')
+    biometric_id = django_filters.CharFilter(field_name='employee__biometric_id', lookup_expr='icontains')
+    generated_by = django_filters.CharFilter(method='filter_generated_by')
+    office = django_filters.CharFilter(method='filter_office')
+    template = django_filters.CharFilter(method='filter_template')
     is_sent = django_filters.BooleanFilter(field_name='is_sent')
     search = django_filters.CharFilter(method='filter_search')
 
     class Meta:
         model = GeneratedDocument
-        fields = ['document_type', 'employee', 'generated_by', 'is_sent', 'search']
+        fields = [
+            'document_type', 'date', 'generated_from', 'generated_to',
+            'employee', 'employee_name', 'employee_id', 'biometric_id',
+            'generated_by', 'office', 'template', 'is_sent', 'search'
+        ]
+
+    def filter_employee(self, queryset, name, value):
+        if not value:
+            return queryset
+        try:
+            import uuid
+            employee_uuid = uuid.UUID(value)
+            return queryset.filter(employee__id=employee_uuid)
+        except (ValueError, TypeError):
+            return queryset.filter(
+                Q(employee__first_name__icontains=value) |
+                Q(employee__last_name__icontains=value) |
+                Q(employee__username__icontains=value) |
+                Q(employee__email__icontains=value) |
+                Q(employee__employee_id__icontains=value) |
+                Q(employee__biometric_id__icontains=value)
+            )
+
+    def filter_employee_name(self, queryset, name, value):
+        if not value:
+            return queryset
+
+        terms = [term for term in value.strip().split() if term]
+        if not terms:
+            return queryset
+
+        for term in terms:
+            queryset = queryset.filter(
+                Q(employee__first_name__icontains=term) |
+                Q(employee__last_name__icontains=term) |
+                Q(employee__username__icontains=term)
+            )
+        return queryset
+
+    def filter_generated_by(self, queryset, name, value):
+        if not value:
+            return queryset
+        try:
+            import uuid
+            generated_by_uuid = uuid.UUID(value)
+            return queryset.filter(generated_by__id=generated_by_uuid)
+        except (ValueError, TypeError):
+            return queryset.filter(
+                Q(generated_by__first_name__icontains=value) |
+                Q(generated_by__last_name__icontains=value) |
+                Q(generated_by__username__icontains=value) |
+                Q(generated_by__email__icontains=value)
+            )
+
+    def filter_office(self, queryset, name, value):
+        if not value or value == 'all':
+            return queryset
+        try:
+            import uuid
+            office_uuid = uuid.UUID(value)
+            return queryset.filter(employee__office__id=office_uuid)
+        except (ValueError, TypeError):
+            return queryset.filter(employee__office__name__icontains=value)
+
+    def filter_template(self, queryset, name, value):
+        if not value:
+            return queryset
+        try:
+            import uuid
+            template_uuid = uuid.UUID(value)
+            return queryset.filter(template__id=template_uuid)
+        except (ValueError, TypeError):
+            return queryset.filter(template__name__icontains=value)
 
     def filter_search(self, queryset, name, value):
         if not value:
             return queryset
         return queryset.filter(
             Q(title__icontains=value) |
+            Q(document_type__icontains=value) |
             Q(employee__first_name__icontains=value) |
             Q(employee__last_name__icontains=value) |
-            Q(employee__employee_id__icontains=value)
+            Q(employee__username__icontains=value) |
+            Q(employee__email__icontains=value) |
+            Q(employee__employee_id__icontains=value) |
+            Q(employee__biometric_id__icontains=value) |
+            Q(employee__office__name__icontains=value) |
+            Q(template__name__icontains=value) |
+            Q(generated_by__first_name__icontains=value) |
+            Q(generated_by__last_name__icontains=value) |
+            Q(generated_by__username__icontains=value)
         )

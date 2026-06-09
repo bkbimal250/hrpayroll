@@ -43,6 +43,12 @@ class Command(BaseCommand):
             help='Maximum seconds allowed for one device fetch before skipping it (default: 60)'
         )
         parser.add_argument(
+            '--lookback-hours',
+            type=int,
+            default=24,
+            help='Only process device scans from the last N hours (default: 24)'
+        )
+        parser.add_argument(
             '--daemon',
             action='store_true',
             help='Run as daemon (background process)'
@@ -66,6 +72,7 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         interval = options['interval']
         device_timeout = options['device_timeout']
+        lookback_hours = options['lookback_hours']
         daemon_mode = options['daemon']
         foreground_mode = options['foreground']
         stop_service = options['stop']
@@ -84,7 +91,11 @@ class Command(BaseCommand):
         signal.signal(signal.SIGTERM, self.signal_handler)
         
         # Create service instance
-        self.service = AutoAttendanceService(interval=interval, device_timeout=device_timeout)
+        self.service = AutoAttendanceService(
+            interval=interval,
+            device_timeout=device_timeout,
+            lookback_hours=lookback_hours,
+        )
         
         if daemon_mode:
             self.run_daemon_mode()
@@ -94,7 +105,10 @@ class Command(BaseCommand):
     def run_foreground_mode(self):
         """Run service in foreground mode"""
         self.stdout.write(
-            self.style.SUCCESS(f"Starting attendance service (interval: {self.service.interval}s)")
+            self.style.SUCCESS(
+                f"Starting attendance service (interval: {self.service.interval}s, "
+                f"lookback: {self.service.lookback_hours}h)"
+            )
         )
         self.stdout.write("Press Ctrl+C to stop")
         

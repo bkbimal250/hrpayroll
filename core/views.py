@@ -22,7 +22,8 @@ from .models import (
     CustomUser, Office, Device, DeviceUser, Attendance, WorkingHoursSettings, 
     ESSLAttendanceLog, Leave, Document, Notification, SystemSettings,
     DocumentTemplate, GeneratedDocument, Resignation, Department, Designation,
-    Shift, EmployeeShiftAssignment
+    Shift, EmployeeShiftAssignment, EmployeeStatusAuditLog, BiometricAssignmentHistory, Salary,
+    AttendanceAuditLog, DuplicatePunchAttempt, UnmatchedBiometricPunch
 )
 from .serializers import (
     CustomUserSerializer, CustomUserListSerializer, OfficeSerializer, DeviceSerializer, DeviceUserSerializer,
@@ -35,7 +36,9 @@ from .serializers import (
     UserLoginSerializer, DeviceSyncSerializer, DocumentTemplateSerializer, 
     GeneratedDocumentSerializer, DocumentGenerationSerializer, ResignationSerializer,
     ResignationCreateSerializer, ResignationApprovalSerializer, DepartmentSerializer, DesignationSerializer,
-    ShiftSerializer, EmployeeShiftAssignmentSerializer
+    ShiftSerializer, EmployeeShiftAssignmentSerializer, EmployeeStatusAuditLogSerializer,
+    BiometricAssignmentHistorySerializer, AttendanceAuditLogSerializer, DuplicatePunchAttemptSerializer,
+    UnmatchedBiometricPunchSerializer
 )
 # Permissions are defined inline in this file
 from .zkteco_service import zkteco_service
@@ -79,6 +82,36 @@ class IsAdminOrManager(IsAuthenticated):
         )
 
 
+class IsAdminOrManagerOrHR(IsAuthenticated):
+    """Permission to allow admin, manager, or HR users."""
+    def has_permission(self, request, view):
+        return super().has_permission(request, view) and (
+            request.user.is_admin or request.user.is_manager or request.user.is_hr
+        )
+
+
+class IsAdminOrManagerOrHRNoDelete(IsAdminOrManagerOrHR):
+    """HR can create, read, and update, but cannot delete."""
+    def has_permission(self, request, view):
+        if not super().has_permission(request, view):
+            return False
+        if request.method == 'DELETE' and request.user.is_hr:
+            return False
+        return True
+
+
+class IsAdminOrHRNoDelete(IsAuthenticated):
+    """Admin has full access; HR can create/read/update but cannot delete."""
+    def has_permission(self, request, view):
+        if not super().has_permission(request, view):
+            return False
+        if request.user.is_admin:
+            return True
+        if request.user.is_hr and request.method != 'DELETE':
+            return True
+        return False
+
+
 class IsAccountantUser(IsAuthenticated):
     """Permission to only allow accountant users"""
     def has_permission(self, request, view):
@@ -93,6 +126,14 @@ class IsAdminOrManagerOrAccountant(IsAuthenticated):
         )
 
 
+class IsAdminOrManagerOrAccountantOrHR(IsAuthenticated):
+    """Permission to allow admin, manager, accountant, or HR users."""
+    def has_permission(self, request, view):
+        return super().has_permission(request, view) and (
+            request.user.is_admin or request.user.is_manager or request.user.is_accountant or request.user.is_hr
+        )
+
+
 class IsSuperuserOrAdminOrManager(IsAuthenticated):
     """Permission to allow superuser, admin, or manager users"""
     def has_permission(self, request, view):
@@ -102,8 +143,8 @@ class IsSuperuserOrAdminOrManager(IsAuthenticated):
 
 
 class ReportsViewSet(viewsets.ViewSet):
-    """ViewSet for generating reports - Admin, Manager, and Accountant access"""
-    permission_classes = [IsAdminOrManagerOrAccountant]
+    """ViewSet for generating reports - Admin, Manager, Accountant, and HR access"""
+    permission_classes = [IsAdminOrManagerOrAccountantOrHR]
 
     @action(detail=False, methods=['get'])
     def attendance(self, request):
@@ -116,11 +157,17 @@ class ReportsViewSet(viewsets.ViewSet):
             user_id = request.query_params.get('user')
             status_filter = request.query_params.get('status')
 
-            # Build query - only show attendance for active users
-            queryset = Attendance.objects.select_related('user', 'user__office', 'user__department').filter(user__is_active=True)
+            # Default to active users for operational compatibility; allow historical reports to include inactive users.
+            queryset = Attendance.objects.select_related('user', 'user__office', 'user__department')
+            include_inactive = request.query_params.get('include_inactive') in ['true', '1', 'yes']
+            employment_status = request.query_params.get('employment_status')
+            if employment_status:
+                queryset = queryset.filter(user__employment_status=employment_status)
+            elif not include_inactive:
+                queryset = queryset.filter(user__employment_status__in=['active', 'notice_period'])
 
             # For managers, restrict to their assigned office
-            if request.user.is_manager and not request.user.is_admin:
+            if request.user.is_manager and not (request.user.is_admin or request.user.is_hr):
                 if request.user.office:
                     queryset = queryset.filter(user__office=request.user.office)
                 else:
@@ -137,8 +184,8 @@ class ReportsViewSet(viewsets.ViewSet):
                         'dailyStats': [],
                         'rawData': []
                     })
-            elif request.user.is_admin:
-                # Admins can see all data, apply office filter if specified
+            elif request.user.is_admin or request.user.is_hr or request.user.is_accountant:
+                # Admin, HR, and accountant users can see all data, apply office filter if specified.
                 if office_id:
                     queryset = queryset.filter(user__office_id=office_id)
 
@@ -609,8 +656,14 @@ class ReportsViewSet(viewsets.ViewSet):
             holidays_in_month = set(Holiday.objects.filter(date__range=[start_date, end_date]).values_list('date', flat=True))
             total_holidays = len(holidays_in_month)
             
-            # Get users
-            users_query = CustomUser.objects.filter(role='employee', is_active=True)
+            # Get users. Default is operational employees; historical reports can opt in.
+            include_inactive = request.query_params.get('include_inactive') in ['true', '1', 'yes']
+            employment_status = request.query_params.get('employment_status')
+            users_query = CustomUser.objects.filter(role='employee')
+            if employment_status:
+                users_query = users_query.filter(employment_status=employment_status)
+            elif not include_inactive:
+                users_query = users_query.filter(employment_status__in=['active', 'notice_period'])
             total_users_before_filter = users_query.count()
             
             if office_id:
@@ -760,8 +813,14 @@ class ReportsViewSet(viewsets.ViewSet):
             office_id = request.query_params.get('office')
             user_id = request.query_params.get('user')
             
-            # Build query - only show attendance for active users
-            queryset = Attendance.objects.select_related('user', 'user__office', 'device').filter(user__is_active=True)
+            # Default to current employees; historical reports can opt in to inactive/status-specific records.
+            queryset = Attendance.objects.select_related('user', 'user__office', 'device')
+            include_inactive = request.query_params.get('include_inactive') in ['true', '1', 'yes']
+            employment_status = request.query_params.get('employment_status')
+            if employment_status:
+                queryset = queryset.filter(user__employment_status=employment_status)
+            elif not include_inactive:
+                queryset = queryset.filter(user__employment_status__in=['active', 'notice_period'])
             
             # Apply filters
             if office_id:
@@ -819,16 +878,16 @@ class OfficeViewSet(viewsets.ModelViewSet):
 
     def get_permissions(self):
         if self.action in ['create', 'update', 'partial_update', 'destroy']:
-            return [IsAdminUser()]  # Only admin can modify offices
+            return [IsAdminOrHRNoDelete()]
         elif self.action in ['list', 'retrieve']:
-            return [IsAdminOrManagerOrAccountant()]  # Admin, manager, and accountant can view
+            return [IsAdminOrManagerOrAccountantOrHR()]
         return [permissions.IsAuthenticated()]
 
     def get_queryset(self):
         """Get queryset based on user role"""
         user = self.request.user
         
-        if user.is_admin:
+        if user.is_admin or user.is_hr:
             # Admin can see all offices
             return Office.objects.all()
         elif user.is_manager:
@@ -857,22 +916,22 @@ class OfficeViewSet(viewsets.ModelViewSet):
         stats = {
             'office_id': office.id,
             'office_name': office.name,
-            'total_employees': CustomUser.objects.filter(office=office, role='employee', is_active=True).count(),
+            'total_employees': CustomUser.objects.filter(office=office, role='employee', employment_status__in=['active', 'notice_period']).count(),
             'present_today': Attendance.objects.filter(
                 user__office=office, 
-                user__is_active=True,
+                user__employment_status__in=['active', 'notice_period'],
                 date=timezone.now().date(), 
                 status='present'
             ).count(),
             'absent_today': Attendance.objects.filter(
                 user__office=office, 
-                user__is_active=True,
+                user__employment_status__in=['active', 'notice_period'],
                 date=timezone.now().date(), 
                 status='absent'
             ).count(),
             'pending_leaves': Leave.objects.filter(
                 user__office=office, 
-                user__is_active=True,
+                user__employment_status__in=['active', 'notice_period'],
                 status='pending'
             ).count(),
         }
@@ -942,9 +1001,9 @@ class CustomUserViewSet(viewsets.ModelViewSet):
         logger.info(f"CustomUserViewSet.get_queryset - User: {user.username}, Role: {user.role}, Is Manager: {user.is_manager}")
         logger.info(f"CustomUserViewSet.get_queryset - User office: {user.office}")
         
-        if user.is_admin:
+        if user.is_admin or user.is_hr:
             queryset = queryset.all()
-            logger.info("CustomUserViewSet.get_queryset - Admin: returning all users")
+            logger.info("CustomUserViewSet.get_queryset - Admin/HR: returning all users")
         elif user.is_manager:
             # Managers can see users from their assigned office + themselves
             if user.office:
@@ -996,6 +1055,15 @@ class CustomUserViewSet(viewsets.ModelViewSet):
                 'joining_date',
                 'salary',
                 'pay_bank_name',
+                'employment_status',
+                'exit_type',
+                'resignation_date',
+                'last_working_date',
+                'exit_date',
+                'final_settlement_status',
+                'rehire_eligible',
+                'archived_at',
+                'status_changed_at',
                 'is_active',
             )
 
@@ -1005,11 +1073,266 @@ class CustomUserViewSet(viewsets.ModelViewSet):
     def get_permissions(self):
         if self.action in ['login', 'register']:
             return [permissions.AllowAny()]
-        elif self.action in ['create', 'update', 'partial_update', 'destroy']:
-            return [IsAdminOrManager()]  # Only admin/manager can modify users
-        elif self.action in ['list', 'retrieve']:
-            return [IsAdminOrManagerOrAccountant()]  # Admin, manager, and accountant can view
+        elif self.action in [
+            'create', 'update', 'partial_update', 'destroy', 'mark_notice_period',
+            'mark_resigned', 'mark_left', 'mark_terminated', 'suspend',
+            'archive', 'restore'
+        ]:
+            return [IsAdminOrManagerOrHRNoDelete()]
+        elif self.action in ['list', 'retrieve', 'by_status', 'all_search', 'full_history']:
+            return [IsAdminOrManagerOrAccountantOrHR()]
         return [permissions.IsAuthenticated()]
+
+    def _employee_history_counts(self, employee):
+        """Return high-level history counts used to prevent accidental hard deletion."""
+        return {
+            'attendance': Attendance.objects.filter(user=employee).count(),
+            'raw_biometric_logs': ESSLAttendanceLog.objects.filter(user=employee).count(),
+            'leaves': Leave.objects.filter(user=employee).count(),
+            'documents': Document.objects.filter(user=employee).count(),
+            'generated_documents': GeneratedDocument.objects.filter(employee=employee).count(),
+            'resignations': Resignation.objects.filter(user=employee).count(),
+            'salaries': Salary.objects.filter(employee=employee).count(),
+            'shift_assignments': EmployeeShiftAssignment.objects.filter(employee=employee).count(),
+            'status_audit_logs': EmployeeStatusAuditLog.objects.filter(employee=employee).count(),
+            'biometric_assignment_history': BiometricAssignmentHistory.objects.filter(employee=employee).count(),
+        }
+
+    def _change_employee_status(self, employee, new_status, request, **defaults):
+        remarks = request.data.get('remarks') or request.data.get('reason') or request.data.get('status_change_remarks') or ''
+        update_fields = dict(defaults)
+
+        for date_field in ['resignation_date', 'last_working_date', 'exit_date']:
+            if date_field in request.data:
+                update_fields[date_field] = request.data.get(date_field) or None
+
+        for text_field in ['exit_type', 'exit_reason', 'final_settlement_status']:
+            if text_field in request.data:
+                update_fields[text_field] = request.data.get(text_field) or ''
+
+        if 'rehire_eligible' in request.data:
+            update_fields['rehire_eligible'] = request.data.get('rehire_eligible')
+
+        employee.set_employment_status(
+            new_status,
+            changed_by=request.user,
+            remarks=remarks,
+            **update_fields
+        )
+        serializer = CustomUserSerializer(employee, context={'request': request})
+        return Response({
+            'message': f'Employee status changed to {new_status}. History preserved.',
+            'employee': serializer.data,
+        })
+
+    def destroy(self, request, *args, **kwargs):
+        """Archive employees instead of permanently deleting linked HR history."""
+        employee = self.get_object()
+        employee.set_employment_status(
+            'archived',
+            changed_by=request.user,
+            remarks=request.data.get('remarks', 'Archived through delete endpoint'),
+            is_active=False,
+            archived_at=timezone.now(),
+            archived_by=request.user,
+        )
+        return Response({
+            'message': 'Employee archived successfully, history preserved',
+            'employee_id': str(employee.id),
+            'history_counts': self._employee_history_counts(employee),
+        }, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=['post'])
+    def mark_notice_period(self, request, pk=None):
+        employee = self.get_object()
+        return self._change_employee_status(employee, 'notice_period', request, is_active=True)
+
+    @action(detail=True, methods=['post'])
+    def mark_resigned(self, request, pk=None):
+        employee = self.get_object()
+        return self._change_employee_status(employee, 'resigned', request)
+
+    @action(detail=True, methods=['post'])
+    def mark_left(self, request, pk=None):
+        employee = self.get_object()
+        return self._change_employee_status(
+            employee,
+            'left',
+            request,
+            is_active=False,
+            exit_type=request.data.get('exit_type') or 'left',
+        )
+
+    @action(detail=True, methods=['post'])
+    def mark_terminated(self, request, pk=None):
+        employee = self.get_object()
+        return self._change_employee_status(
+            employee,
+            'terminated',
+            request,
+            is_active=False,
+            exit_type=request.data.get('exit_type') or 'terminated',
+        )
+
+    @action(detail=True, methods=['post'])
+    def suspend(self, request, pk=None):
+        employee = self.get_object()
+        return self._change_employee_status(employee, 'suspended', request, is_active=False)
+
+    @action(detail=True, methods=['post'])
+    def archive(self, request, pk=None):
+        if request.user.is_hr:
+            return Response({'error': 'HR users cannot archive employees'}, status=status.HTTP_403_FORBIDDEN)
+        employee = self.get_object()
+        return self._change_employee_status(
+            employee,
+            'archived',
+            request,
+            is_active=False,
+            archived_at=timezone.now(),
+            archived_by=request.user,
+        )
+
+    @action(detail=True, methods=['post'])
+    def restore(self, request, pk=None):
+        employee = self.get_object()
+        return self._change_employee_status(
+            employee,
+            'active',
+            request,
+            is_active=True,
+            archived_at=None,
+            archived_by=None,
+            exit_type=None,
+            exit_date=None,
+        )
+
+    @action(detail=False, methods=['get'])
+    def by_status(self, request):
+        lifecycle_status = request.query_params.get('employment_status') or request.query_params.get('status')
+        queryset = self.get_queryset()
+        if lifecycle_status:
+            queryset = queryset.filter(employment_status=lifecycle_status)
+        page = self.paginate_queryset(queryset)
+        serializer = CustomUserListSerializer(
+            page if page is not None else queryset,
+            many=True,
+            context={'request': request},
+        )
+        if page is not None:
+            return self.get_paginated_response(serializer.data)
+        return Response(serializer.data)
+
+    @action(detail=False, methods=['get'])
+    def all_search(self, request):
+        queryset = self.get_queryset()
+        search = request.query_params.get('search') or request.query_params.get('q')
+        if search:
+            queryset = queryset.filter(
+                Q(username__icontains=search) |
+                Q(first_name__icontains=search) |
+                Q(last_name__icontains=search) |
+                Q(email__icontains=search) |
+                Q(employee_id__icontains=search) |
+                Q(biometric_id__icontains=search)
+            )
+        page = self.paginate_queryset(queryset)
+        serializer = CustomUserListSerializer(
+            page if page is not None else queryset,
+            many=True,
+            context={'request': request},
+        )
+        if page is not None:
+            return self.get_paginated_response(serializer.data)
+        return Response(serializer.data)
+
+    @action(detail=True, methods=['get'])
+    def full_history(self, request, pk=None):
+        employee = self.get_object()
+        history = {
+            'employee': CustomUserSerializer(employee, context={'request': request}).data,
+            'counts': self._employee_history_counts(employee),
+            'attendance': AttendanceSerializer(
+                Attendance.objects.filter(user=employee).select_related('user', 'device')[:100],
+                many=True,
+                context={'request': request},
+            ).data,
+            'leaves': LeaveSerializer(
+                Leave.objects.filter(user=employee).order_by('-created_at')[:100],
+                many=True,
+                context={'request': request},
+            ).data,
+            'documents': DocumentSerializer(
+                Document.objects.filter(user=employee).order_by('-created_at')[:100],
+                many=True,
+                context={'request': request},
+            ).data,
+            'resignations': ResignationSerializer(
+                Resignation.objects.filter(user=employee).order_by('-created_at'),
+                many=True,
+                context={'request': request},
+            ).data,
+            'salary_history_count': Salary.objects.filter(employee=employee).count(),
+            'biometric_logs_count': ESSLAttendanceLog.objects.filter(user=employee).count(),
+            'status_audit': EmployeeStatusAuditLogSerializer(
+                EmployeeStatusAuditLog.objects.filter(employee=employee),
+                many=True,
+                context={'request': request},
+            ).data,
+            'biometric_assignment_history': BiometricAssignmentHistorySerializer(
+                BiometricAssignmentHistory.objects.filter(employee=employee),
+                many=True,
+                context={'request': request},
+            ).data,
+        }
+        return Response(history)
+
+    @action(detail=False, methods=['get'])
+    def user_stats(self, request):
+        """Return per-employment-status counts for the current filtered queryset.
+
+        Accepts the same query params as the list endpoint (search, department,
+        office) so the HR dashboard lifecycle tab badges stay in sync with the
+        active filters.
+        """
+        queryset = self.get_queryset()
+
+        # Apply optional filters (mirrors CustomUserFilter behaviour)
+        search = request.query_params.get('search') or request.query_params.get('q')
+        if search:
+            from django.db.models import Q as _Q
+            queryset = queryset.filter(
+                _Q(username__icontains=search) |
+                _Q(first_name__icontains=search) |
+                _Q(last_name__icontains=search) |
+                _Q(email__icontains=search) |
+                _Q(employee_id__icontains=search) |
+                _Q(phone__icontains=search)
+            )
+
+        department = request.query_params.get('department')
+        if department:
+            queryset = queryset.filter(department_id=department)
+
+        office = request.query_params.get('office')
+        if office == 'null':
+            queryset = queryset.filter(office__isnull=True)
+        elif office:
+            queryset = queryset.filter(office_id=office)
+
+        statuses = ['active', 'notice_period', 'left', 'terminated', 'suspended', 'archived']
+        counts = {s: queryset.filter(employment_status=s).count() for s in statuses}
+        counts['total'] = queryset.count()
+
+        return Response({
+            'totalUsers':        counts['total'],
+            'activeUsers':       counts['active'],
+            'noticePeriodUsers': counts['notice_period'],
+            'leftUsers':         counts['left'],
+            'terminatedUsers':   counts['terminated'],
+            'suspendedUsers':    counts['suspended'],
+            'archivedUsers':     counts['archived'],
+        })
 
     @action(detail=False, methods=['post'])
     def register(self, request):
@@ -1045,6 +1368,10 @@ class CustomUserViewSet(viewsets.ModelViewSet):
             elif dashboard_type == 'manager' and user.role != 'manager':
                 return Response({
                     'error': 'Access denied. Manager dashboard is only for manager users.'
+                }, status=status.HTTP_403_FORBIDDEN)
+            elif dashboard_type == 'hr' and user.role != 'hr':
+                return Response({
+                    'error': 'Access denied. HR dashboard is only for HR users.'
                 }, status=status.HTTP_403_FORBIDDEN)
             elif dashboard_type == 'employee' and user.role != 'employee':
                 log_auth_event("LOGIN_FAILED", request=request, user=user, reason="dashboard_access_denied")
@@ -1464,10 +1791,16 @@ class AttendanceViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         user = self.request.user
-        # Base queryset - only show attendance for active users
-        base_queryset = Attendance.objects.select_related('user', 'user__office', 'device').filter(user__is_active=True)
+        # Base queryset defaults to active/notice-period users, with opt-in historical inclusion.
+        base_queryset = Attendance.objects.select_related('user', 'user__office', 'device')
+        include_inactive = self.request.query_params.get('include_inactive') in ['true', '1', 'yes']
+        employment_status = self.request.query_params.get('employment_status')
+        if employment_status:
+            base_queryset = base_queryset.filter(user__employment_status=employment_status)
+        elif not include_inactive:
+            base_queryset = base_queryset.filter(user__employment_status__in=['active', 'notice_period'])
         
-        if user.is_admin:
+        if user.is_admin or user.is_hr:
             return base_queryset
         elif user.is_manager:
             return base_queryset.filter(user__office=user.office)
@@ -1497,7 +1830,7 @@ class AttendanceViewSet(viewsets.ModelViewSet):
         
         # Calculate total active users for absence calculation
         # This considers the current office filter if applied
-        user_queryset = CustomUser.objects.filter(is_active=True)
+        user_queryset = CustomUser.objects.filter(employment_status__in=['active', 'notice_period'])
         office_id = request.query_params.get('office') or request.query_params.get('office_id')
         if office_id:
              user_queryset = user_queryset.filter(office__id=office_id)
@@ -1528,10 +1861,10 @@ class AttendanceViewSet(viewsets.ModelViewSet):
         })
 
     def get_permissions(self):
-        if self.action in ['create', 'update', 'partial_update', 'destroy']:
-            return [IsAdminOrManager()]  # Only admin/manager can modify attendance
+        if self.action in ['create', 'update', 'partial_update', 'destroy', 'bulk_create']:
+            return [IsAdminOrManagerOrHRNoDelete()]
         elif self.action in ['list', 'retrieve']:
-            return [IsAdminOrManagerOrAccountant()]  # Admin, manager, and accountant can view
+            return [IsAdminOrManagerOrAccountantOrHR()]
         return [permissions.IsAuthenticated()]
 
     def get_serializer_class(self):
@@ -1660,10 +1993,12 @@ class AttendanceViewSet(viewsets.ModelViewSet):
             
             try:
                 # FIXED: Added designation__department to select_related to fix the __str__ method issue
-                user = CustomUser.objects.select_related('department', 'designation', 'designation__department', 'office').get(id=user_id, is_active=True)
+                user = CustomUser.objects.select_related(
+                    'department', 'designation', 'designation__department', 'office'
+                ).get(id=user_id, employment_status__in=['active', 'notice_period'])
             except CustomUser.DoesNotExist:
                 return Response(
-                    {'error': 'User not found or inactive'}, 
+                    {'error': 'User not found or not eligible for operational attendance'},
                     status=status.HTTP_404_NOT_FOUND
                 )
             
@@ -1896,6 +2231,7 @@ class AttendanceViewSet(viewsets.ModelViewSet):
             new_status = request.data.get('status')
             new_day_status = request.data.get('day_status')
             notes = request.data.get('notes', '')
+            reason = request.data.get('reason') or request.data.get('remarks') or notes
             
             if not all([user_id, date_str, new_status]):
                 return Response(
@@ -1916,10 +2252,10 @@ class AttendanceViewSet(viewsets.ModelViewSet):
                 )
             
             try:
-                user = CustomUser.objects.get(id=user_id, is_active=True)
+                user = CustomUser.objects.get(id=user_id, employment_status__in=['active', 'notice_period'])
             except CustomUser.DoesNotExist:
                 return Response(
-                    {'error': 'User not found or inactive'}, 
+                    {'error': 'User not found or not eligible for operational attendance'},
                     status=status.HTTP_404_NOT_FOUND
                 )
             
@@ -1942,23 +2278,83 @@ class AttendanceViewSet(viewsets.ModelViewSet):
                     'notes': notes,
                     'is_late': False,
                     'late_minutes': 0,
+                    'source': 'manual',
+                    'manual_override': True,
                 }
             )
+
+            old_values = {
+                'check_in': attendance.check_in_time,
+                'check_out': attendance.check_out_time,
+                'status': attendance.status,
+                'day_status': attendance.day_status,
+            }
+
+            if attendance.is_locked and not request.user.is_superuser:
+                AttendanceAuditLog.objects.create(
+                    attendance=attendance,
+                    employee=attendance.user,
+                    date=attendance.date,
+                    old_check_in=old_values['check_in'],
+                    new_check_in=attendance.check_in_time,
+                    old_check_out=old_values['check_out'],
+                    new_check_out=attendance.check_out_time,
+                    old_status=old_values['status'],
+                    new_status=attendance.status,
+                    old_day_status=old_values['day_status'],
+                    new_day_status=attendance.day_status,
+                    change_type='locked_modification_attempt',
+                    source='admin_correction',
+                    was_locked=True,
+                    changed_by=request.user,
+                    reason=reason or 'Attempted manual update on locked payroll attendance.',
+                )
+                return Response(
+                    {'error': 'Attendance is locked because payroll was generated for this month. Super admin permission and reason are required.'},
+                    status=status.HTTP_403_FORBIDDEN
+                )
+
+            if attendance.is_locked and request.user.is_superuser and not reason:
+                return Response(
+                    {'error': 'Reason is required to modify locked attendance.'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
             
             if not created:
                 # Update existing record using manual method to bypass automatic calculations
                 attendance.manual_update_status(
                     new_status=new_status,
                     new_day_status=new_day_status,
-                    notes=notes
+                    notes=notes,
+                    source='admin_correction'
                 )
             else:
                 # For newly created records, also update using manual method to ensure consistency
                 attendance.manual_update_status(
                     new_status=new_status,
                     new_day_status=new_day_status,
-                    notes=notes
+                    notes=notes,
+                    source='manual'
                 )
+
+            AttendanceAuditLog.objects.create(
+                attendance=attendance,
+                employee=attendance.user,
+                date=attendance.date,
+                old_check_in=old_values['check_in'],
+                new_check_in=attendance.check_in_time,
+                old_check_out=old_values['check_out'],
+                new_check_out=attendance.check_out_time,
+                old_status=old_values['status'],
+                new_status=attendance.status,
+                old_day_status=old_values['day_status'],
+                new_day_status=attendance.day_status,
+                change_type='locked_modification' if attendance.is_locked else 'manual_update',
+                source=attendance.source,
+                was_locked=attendance.is_locked,
+                changed_by=request.user,
+                reason=reason,
+            )
             
             # Return updated attendance data
             response_data = {
@@ -1981,6 +2377,107 @@ class AttendanceViewSet(viewsets.ModelViewSet):
                 {'error': f'An error occurred: {str(e)}'}, 
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
+
+    @action(detail=False, methods=['get'])
+    def unmatched_punches(self, request):
+        """Review biometric punches that could not be mapped safely to an employee."""
+        queryset = UnmatchedBiometricPunch.objects.select_related('device', 'resolved_user').all()
+        review_status = request.query_params.get('review_status')
+        if review_status:
+            queryset = queryset.filter(review_status=review_status)
+        page = self.paginate_queryset(queryset)
+        if page is not None:
+            serializer = UnmatchedBiometricPunchSerializer(page, many=True)
+            return self.get_paginated_response(serializer.data)
+        serializer = UnmatchedBiometricPunchSerializer(queryset, many=True)
+        return Response(serializer.data)
+
+    @action(detail=False, methods=['get'])
+    def duplicate_punches(self, request):
+        """Review duplicate punch attempts ignored by final attendance processing."""
+        queryset = DuplicatePunchAttempt.objects.select_related('device', 'existing_log').all()
+        page = self.paginate_queryset(queryset)
+        if page is not None:
+            serializer = DuplicatePunchAttemptSerializer(page, many=True)
+            return self.get_paginated_response(serializer.data)
+        serializer = DuplicatePunchAttemptSerializer(queryset, many=True)
+        return Response(serializer.data)
+
+    @action(detail=False, methods=['get'])
+    def missing_checkout(self, request):
+        """Attendance records that have check-in but no checkout and need review."""
+        queryset = self.get_queryset().filter(check_in_time__isnull=False, check_out_time__isnull=True)
+        page = self.paginate_queryset(queryset)
+        if page is not None:
+            serializer = self.get_serializer(page, many=True)
+            return self.get_paginated_response(serializer.data)
+        serializer = self.get_serializer(queryset, many=True)
+        return Response(serializer.data)
+
+    @action(detail=False, methods=['get'])
+    def locked_attempts(self, request):
+        """Audit records for blocked edits on locked attendance."""
+        queryset = AttendanceAuditLog.objects.select_related('attendance', 'employee', 'changed_by').filter(
+            change_type='locked_modification_attempt'
+        )
+        page = self.paginate_queryset(queryset)
+        if page is not None:
+            serializer = AttendanceAuditLogSerializer(page, many=True)
+            return self.get_paginated_response(serializer.data)
+        serializer = AttendanceAuditLogSerializer(queryset, many=True)
+        return Response(serializer.data)
+
+    @action(detail=False, methods=['get'])
+    def audit_history(self, request):
+        """Manual/system attendance audit history with optional employee/date filters."""
+        queryset = AttendanceAuditLog.objects.select_related('attendance', 'employee', 'changed_by').all()
+        user_id = request.query_params.get('user_id')
+        date_value = request.query_params.get('date')
+        if user_id:
+            queryset = queryset.filter(employee_id=user_id)
+        if date_value:
+            queryset = queryset.filter(date=date_value)
+        page = self.paginate_queryset(queryset)
+        if page is not None:
+            serializer = AttendanceAuditLogSerializer(page, many=True)
+            return self.get_paginated_response(serializer.data)
+        serializer = AttendanceAuditLogSerializer(queryset, many=True)
+        return Response(serializer.data)
+
+    @action(detail=True, methods=['post'])
+    def unlock(self, request, pk=None):
+        """Unlock a payroll-locked attendance record. Super admin only."""
+        attendance = self.get_object()
+        reason = request.data.get('reason') or request.data.get('remarks')
+        if not request.user.is_superuser:
+            return Response({'error': 'Only super admin can unlock attendance.'}, status=status.HTTP_403_FORBIDDEN)
+        if not reason:
+            return Response({'error': 'Reason is required to unlock attendance.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        AttendanceAuditLog.objects.create(
+            attendance=attendance,
+            employee=attendance.user,
+            date=attendance.date,
+            old_check_in=attendance.check_in_time,
+            new_check_in=attendance.check_in_time,
+            old_check_out=attendance.check_out_time,
+            new_check_out=attendance.check_out_time,
+            old_status=attendance.status,
+            new_status=attendance.status,
+            old_day_status=attendance.day_status,
+            new_day_status=attendance.day_status,
+            change_type='unlock',
+            source='admin_correction',
+            was_locked=attendance.is_locked,
+            changed_by=request.user,
+            reason=reason,
+        )
+        attendance.is_locked = False
+        attendance.lock_reason = ''
+        attendance.locked_at = None
+        attendance.locked_by = None
+        attendance.save(update_fields=['is_locked', 'lock_reason', 'locked_at', 'locked_by', 'updated_at'])
+        return Response({'message': 'Attendance unlocked successfully.'})
 
     @action(detail=False, methods=['get'])
     def fingerprint_changes(self, request):
@@ -2158,7 +2655,7 @@ class AttendanceViewSet(viewsets.ModelViewSet):
                 office_users = CustomUser.objects.filter(
                     office_id=office_id, 
                     role='employee', 
-                    is_active=True
+                    employment_status__in=['active', 'notice_period']
                 )
             else:
                 # If no office specified, get users from manager's office
@@ -2166,10 +2663,10 @@ class AttendanceViewSet(viewsets.ModelViewSet):
                     office_users = CustomUser.objects.filter(
                         office=request.user.office, 
                         role='employee', 
-                        is_active=True
+                        employment_status__in=['active', 'notice_period']
                     )
                 else:
-                    office_users = CustomUser.objects.filter(role='employee', is_active=True)
+                    office_users = CustomUser.objects.filter(role='employee', employment_status__in=['active', 'notice_period'])
             
             # Get attendance records for the date - IMPORTANT: Use distinct to avoid duplicates
             # Note: distinct('user_id') only works with PostgreSQL, use Python-level deduplication for MySQL
@@ -2765,7 +3262,7 @@ class LeaveViewSet(viewsets.ModelViewSet):
             'approved_by'
         ).prefetch_related('user__department', 'user__designation')
         
-        if user.is_admin:
+        if user.is_admin or user.is_hr:
             return base_queryset
         elif user.is_manager:
             return base_queryset.filter(user__office=user.office)
@@ -2776,7 +3273,7 @@ class LeaveViewSet(viewsets.ModelViewSet):
         if self.action in ['create', 'update', 'partial_update', 'destroy']:
             if self.action == 'create':
                 return [permissions.IsAuthenticated()]
-            return [IsAdminOrManager()]
+            return [IsAdminOrManagerOrHRNoDelete()]
         return [permissions.IsAuthenticated()]
 
     def get_serializer_class(self):
@@ -2787,7 +3284,7 @@ class LeaveViewSet(viewsets.ModelViewSet):
         return LeaveSerializer
 
     def perform_create(self, serializer):
-        serializer.save(user=self.request.user)
+        serializer.save()
 
     @action(detail=False, methods=['get'])
     def my(self, request):
@@ -2796,7 +3293,7 @@ class LeaveViewSet(viewsets.ModelViewSet):
         serializer = self.get_serializer(queryset, many=True)
         return Response(serializer.data)
 
-    @action(detail=True, methods=['post'], permission_classes=[IsAdminOrManager])
+    @action(detail=True, methods=['post'], permission_classes=[IsAdminOrManagerOrHR])
     def approve(self, request, pk=None):
         """Approve leave request"""
         leave = self.get_object()
@@ -2812,7 +3309,7 @@ class LeaveViewSet(viewsets.ModelViewSet):
             return Response(LeaveSerializer(leave, context={'request': request}).data)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-    @action(detail=True, methods=['post'], permission_classes=[IsAdminOrManager])
+    @action(detail=True, methods=['post'], permission_classes=[IsAdminOrManagerOrHR])
     def reject(self, request, pk=None):
         """Reject leave request"""
         leave = self.get_object()
@@ -2848,7 +3345,7 @@ class DocumentViewSet(viewsets.ModelViewSet):
         user = self.request.user
         base_queryset = Document.objects.select_related('user', 'user__office', 'uploaded_by')
         
-        if user.is_admin:
+        if user.is_admin or user.is_hr:
             return base_queryset.all()
         elif user.is_manager:
             # Managers can see documents uploaded by them or documents of their office employees
@@ -2883,6 +3380,11 @@ class DocumentViewSet(viewsets.ModelViewSet):
                 raise serializers.ValidationError("You can only upload documents for employees in your office")
         
         serializer.save(uploaded_by=user)
+
+    def destroy(self, request, *args, **kwargs):
+        if request.user.is_hr:
+            return Response({'error': 'HR users cannot delete documents'}, status=status.HTTP_403_FORBIDDEN)
+        return super().destroy(request, *args, **kwargs)
 
     @action(detail=False, methods=['get'])
     def my(self, request):
@@ -2923,14 +3425,13 @@ class DocumentViewSet(viewsets.ModelViewSet):
     def manager_employees(self, request):
         """Get employees that manager can upload documents for"""
         user = request.user
-        if not user.is_manager:
+        if not (user.is_manager or user.is_hr or user.is_admin):
             return Response({'error': 'Access denied'}, status=status.HTTP_403_FORBIDDEN)
-        
-        employees = CustomUser.objects.filter(
-            office=user.office,
-            role='employee',
-            is_active=True
-        ).values('id', 'first_name', 'last_name', 'employee_id', 'email')
+
+        employees = CustomUser.objects.filter(role='employee', is_active=True)
+        if user.is_manager:
+            employees = employees.filter(office=user.office)
+        employees = employees.values('id', 'first_name', 'last_name', 'employee_id', 'email')
         
         return Response({
             'employees': list(employees)
@@ -2943,7 +3444,7 @@ class DocumentViewSet(viewsets.ModelViewSet):
         
         # Check if user has permission to download this document
         user = request.user
-        if not (user.is_admin or user.is_manager or document.user == user or document.uploaded_by == user):
+        if not (user.is_admin or user.is_manager or user.is_hr or document.user == user or document.uploaded_by == user):
             return Response({'error': 'Access denied'}, status=status.HTTP_403_FORBIDDEN)
         
         try:
@@ -2985,7 +3486,10 @@ class NotificationViewSet(viewsets.ModelViewSet):
         from django.utils import timezone
         from django.db.models import Q
         
-        queryset = Notification.objects.filter(user=self.request.user)
+        if self.request.user.is_hr:
+            queryset = Notification.objects.all()
+        else:
+            queryset = Notification.objects.filter(user=self.request.user)
         
         # Filter out expired notifications
         queryset = queryset.filter(
@@ -2996,10 +3500,12 @@ class NotificationViewSet(viewsets.ModelViewSet):
 
     def get_permissions(self):
         """Set permissions based on action"""
-        if self.action in ['list', 'retrieve', 'mark_read', 'mark_all_read', 'unread_count', 'destroy']:
+        if self.action in ['list', 'retrieve', 'mark_read', 'mark_all_read', 'unread_count']:
+            permission_classes = [IsAuthenticated]
+        elif self.action == 'destroy':
             permission_classes = [IsAuthenticated]
         else:
-            permission_classes = [IsAdminOrManagerOrAccountant]
+            permission_classes = [IsAdminOrManagerOrAccountantOrHR]
         return [permission() for permission in permission_classes]
 
     @action(detail=True, methods=['post'])
@@ -3032,6 +3538,8 @@ class NotificationViewSet(viewsets.ModelViewSet):
 
     def destroy(self, request, pk=None):
         """Delete a notification"""
+        if request.user.is_hr:
+            return Response({'error': 'HR users cannot delete notifications'}, status=status.HTTP_403_FORBIDDEN)
         from .notification_service import NotificationService
         
         success = NotificationService.delete_notification(pk, request.user)
@@ -3042,6 +3550,8 @@ class NotificationViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['post'])
     def delete_expired(self, request):
         """Delete expired notifications"""
+        if request.user.is_hr:
+            return Response({'error': 'HR users cannot delete notifications'}, status=status.HTTP_403_FORBIDDEN)
         from .notification_service import NotificationService
         
         deleted_count = NotificationService.delete_expired_notifications()
@@ -3052,6 +3562,8 @@ class NotificationViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['post'])
     def cleanup_old(self, request):
         """Clean up old notifications (admin only)"""
+        if request.user.is_hr:
+            return Response({'error': 'HR users cannot delete notifications'}, status=status.HTTP_403_FORBIDDEN)
         from .notification_service import NotificationService
         
         days = request.data.get('days', 30)
@@ -3189,6 +3701,7 @@ class NotificationViewSet(viewsets.ModelViewSet):
             'roles': list(roles),
             'role_choices': [
                 {'value': 'admin', 'label': 'Admin'},
+                {'value': 'hr', 'label': 'HR'},
                 {'value': 'manager', 'label': 'Manager'},
                 {'value': 'employee', 'label': 'Employee'},
                 {'value': 'accountant', 'label': 'Accountant'},
@@ -3209,13 +3722,13 @@ class SystemSettingsViewSet(viewsets.ModelViewSet):
 class AttendanceLogViewSet(viewsets.ReadOnlyModelViewSet):
     """ViewSet for AttendanceLog model - Read only"""
     serializer_class = AttendanceLogSerializer
-    permission_classes = [IsAdminOrManager]
+    permission_classes = [IsAdminOrManagerOrHR]
     filter_backends = [filters.OrderingFilter]
     ordering_fields = ['created_at']
 
     def get_queryset(self):
         user = self.request.user
-        if user.is_admin:
+        if user.is_admin or user.is_hr:
             return AttendanceLog.objects.all()
         elif user.is_manager:
             return AttendanceLog.objects.filter(attendance__user__office=user.office)
@@ -3238,6 +3751,7 @@ def debug_user_permissions(request):
         'role': user.role,
         'is_admin': user.is_admin,
         'is_manager': user.is_manager,
+        'is_hr': user.is_hr,
         'is_accountant': user.is_accountant,
         'is_employee': user.is_employee,
         'office_id': str(user.office.id) if user.office else None,
@@ -3266,24 +3780,26 @@ class DashboardViewSet(viewsets.ViewSet):
             today = timezone.now().date()
             last_month = today - timedelta(days=30)
             
-            if user.is_admin:
-                # Calculate comprehensive statistics for admin - only active users
-                total_employees = CustomUser.objects.filter(role='employee', is_active=True).count()
-                total_managers = CustomUser.objects.filter(role='manager', is_active=True).count()
-                total_accountants = CustomUser.objects.filter(role='accountant', is_active=True).count()
+            if user.is_admin or user.is_hr:
+                operational_statuses = ['active', 'notice_period']
+                # Calculate comprehensive statistics for admin - operational employees
+                total_employees = CustomUser.objects.filter(role='employee', employment_status__in=operational_statuses).count()
+                total_managers = CustomUser.objects.filter(role='manager', employment_status__in=operational_statuses).count()
+                total_hr = CustomUser.objects.filter(role='hr', employment_status__in=operational_statuses).count()
+                total_accountants = CustomUser.objects.filter(role='accountant', employment_status__in=operational_statuses).count()
                 total_offices = Office.objects.count()
                 total_devices = Device.objects.count()
                 active_devices = Device.objects.filter(is_active=True).count()
                 
-                # Attendance statistics - only active users
+                # Attendance statistics - operational employees only
                 today_attendance = Attendance.objects.filter(
                     date=today, 
                     status='present',
-                    user__is_active=True
+                    user__employment_status__in=operational_statuses
                 ).count()
                 total_today_records = Attendance.objects.filter(
                     date=today,
-                    user__is_active=True
+                    user__employment_status__in=operational_statuses
                 ).count()
                 attendance_rate = (today_attendance / total_today_records * 100) if total_today_records > 0 else 0
                 
@@ -3294,7 +3810,7 @@ class DashboardViewSet(viewsets.ViewSet):
                 leave_approval_rate = (approved_leaves / total_leaves * 100) if total_leaves > 0 else 0
                 
                 # User statistics
-                active_users = CustomUser.objects.filter(is_active=True).count()
+                active_users = CustomUser.objects.filter(employment_status__in=operational_statuses).count()
                 total_users = CustomUser.objects.count()
                 inactive_users = total_users - active_users
                 
@@ -3308,6 +3824,7 @@ class DashboardViewSet(viewsets.ViewSet):
                 stats = {
                     'total_employees': total_employees,
                     'total_managers': total_managers,
+                    'total_hr': total_hr,
                     'total_accountants': total_accountants,
                     'total_offices': total_offices,
                     'total_devices': total_devices,
@@ -3331,21 +3848,21 @@ class DashboardViewSet(viewsets.ViewSet):
                 total_employees = CustomUser.objects.filter(
                     office=office, 
                     role='employee',
-                    is_active=True
+                    employment_status__in=['active', 'notice_period']
                 ).count()
                 total_devices = Device.objects.filter(office=office).count()
                 active_devices = Device.objects.filter(office=office, is_active=True).count()
                 
-                # Office attendance statistics - only active users
+                # Office attendance statistics - operational employees only
                 today_attendance = Attendance.objects.filter(
                     user__office=office,
-                    user__is_active=True,
+                    user__employment_status__in=['active', 'notice_period'],
                     date=today, 
                     status='present'
                 ).count()
                 total_today_records = Attendance.objects.filter(
                     user__office=office,
-                    user__is_active=True,
+                    user__employment_status__in=['active', 'notice_period'],
                     date=today
                 ).count()
                 attendance_rate = (today_attendance / total_today_records * 100) if total_today_records > 0 else 0
@@ -3365,7 +3882,7 @@ class DashboardViewSet(viewsets.ViewSet):
                 # Office user statistics
                 active_users = CustomUser.objects.filter(
                     office=office, 
-                    is_active=True
+                    employment_status__in=['active', 'notice_period']
                 ).count()
                 total_users = CustomUser.objects.filter(office=office).count()
                 
@@ -3818,7 +4335,7 @@ class ResignationViewSet(viewsets.ModelViewSet):
         """Get queryset based on user role"""
         user = self.request.user
         
-        if user.is_admin:
+        if user.is_admin or user.is_hr:
             # Admin can see all resignations
             return Resignation.objects.select_related('user', 'approved_by').all()
         elif user.is_manager:
@@ -3850,6 +4367,8 @@ class ResignationViewSet(viewsets.ModelViewSet):
             permission_classes = [IsAuthenticated]
         elif self.action in ['approve', 'reject']:
             # Only admin and manager can approve/reject
+            permission_classes = [IsAdminOrManagerOrHR]
+        elif self.action in ['destroy']:
             permission_classes = [IsAdminOrManager]
         else:
             # Default permissions
@@ -3879,6 +4398,16 @@ class ResignationViewSet(viewsets.ModelViewSet):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         resignation = serializer.save()
+
+        resignation.user.set_employment_status(
+            'notice_period',
+            changed_by=request.user,
+            remarks='Resignation submitted',
+            is_active=True,
+            resignation_date=resignation.resignation_date,
+            last_working_date=resignation.last_working_date,
+            exit_type='resigned',
+        )
         
         # Create notification for managers/admins
         self._create_resignation_notification(resignation)
@@ -3912,6 +4441,16 @@ class ResignationViewSet(viewsets.ModelViewSet):
         resignation.approved_by = request.user
         resignation.approved_at = timezone.now()
         resignation.save()
+
+        resignation.user.set_employment_status(
+            'notice_period',
+            changed_by=request.user,
+            remarks='Resignation approved',
+            is_active=True,
+            resignation_date=resignation.resignation_date,
+            last_working_date=resignation.last_working_date,
+            exit_type='resigned',
+        )
         
         # Create notification for the employee
         self._create_approval_notification(resignation, 'approved')
@@ -3949,6 +4488,13 @@ class ResignationViewSet(viewsets.ModelViewSet):
         resignation.status = 'rejected'
         resignation.rejection_reason = serializer.validated_data.get('rejection_reason', '')
         resignation.save()
+
+        if not Resignation.objects.filter(user=resignation.user, status__in=['pending', 'approved']).exclude(id=resignation.id).exists():
+            resignation.user.set_employment_status(
+                'active',
+                changed_by=request.user,
+                remarks='Resignation rejected',
+            )
         
         # Create notification for the employee
         self._create_approval_notification(resignation, 'rejected')
@@ -3965,21 +4511,52 @@ class ResignationViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['post'])
     def cancel(self, request, pk=None):
-        """Cancel a resignation request (only by the employee who created it)"""
+        """Cancel a resignation request.
+
+        Employees can cancel their own pending request. Admin, manager, and HR can
+        cancel pending or approved resignations visible to them.
+        """
         resignation = self.get_object()
+        is_privileged_user = request.user.is_admin or request.user.is_manager or request.user.is_hr
         
-        if resignation.user != request.user:
+        if not is_privileged_user and resignation.user != request.user:
             return Response({
                 'error': 'You can only cancel your own resignation requests'
             }, status=status.HTTP_403_FORBIDDEN)
         
-        if resignation.status != 'pending':
+        allowed_statuses = ['pending', 'approved'] if is_privileged_user else ['pending']
+        if resignation.status not in allowed_statuses:
             return Response({
-                'error': 'Only pending resignations can be cancelled'
+                'error': 'Only pending or approved resignations can be cancelled by admin, manager, or HR'
+                if is_privileged_user
+                else 'Only pending resignations can be cancelled by the employee'
             }, status=status.HTTP_400_BAD_REQUEST)
         
         resignation.status = 'cancelled'
+        cancellation_reason = request.data.get('cancellation_reason') or request.data.get('rejection_reason') or ''
+        if cancellation_reason:
+            resignation.rejection_reason = cancellation_reason
+        if is_privileged_user:
+            resignation.approved_by = request.user
+            resignation.approved_at = timezone.now()
         resignation.save()
+
+        if not Resignation.objects.filter(user=resignation.user, status__in=['pending', 'approved']).exclude(id=resignation.id).exists():
+            resignation.user.set_employment_status(
+                'active',
+                changed_by=request.user,
+                remarks='Resignation cancelled',
+                resignation_date=None,
+                last_working_date=None,
+                exit_type=None,
+            )
+        
+        try:
+            from .consumers import broadcast_resignation_update_sync
+            resignation_data = ResignationSerializer(resignation).data
+            broadcast_resignation_update_sync(resignation_data)
+        except Exception as e:
+            print(f"Error broadcasting resignation update: {e}")
         
         return Response(ResignationSerializer(resignation).data)
 
@@ -4008,7 +4585,7 @@ class ResignationViewSet(viewsets.ModelViewSet):
         user = request.user
         
         # Get base queryset based on user role
-        if user.is_admin:
+        if user.is_admin or user.is_hr:
             # Admin can see all resignations
             queryset = Resignation.objects.all()
         elif user.is_manager:
@@ -4044,11 +4621,11 @@ class ResignationViewSet(viewsets.ModelViewSet):
             # Notify office manager and admins
             managers = CustomUser.objects.filter(
                 Q(role='manager', office=resignation.user.office) | 
-                Q(role='admin')
+                Q(role__in=['admin', 'hr'])
             ).distinct()
         else:
             # Notify all admins if user has no office
-            managers = CustomUser.objects.filter(role='admin')
+            managers = CustomUser.objects.filter(role__in=['admin', 'hr'])
         
         for manager in managers:
             Notification.objects.create(
@@ -4374,16 +4951,16 @@ class ShiftViewSet(viewsets.ModelViewSet):
 
     def get_permissions(self):
         if self.action in ['create', 'update', 'partial_update', 'destroy']:
-            return [IsAdminOrManager()]  # Only admin or manager can modify shifts
+            return [IsAdminOrManagerOrHRNoDelete()]
         elif self.action in ['list', 'retrieve']:
-            return [IsAdminOrManagerOrAccountant()]  # Admin, manager, and accountant can view
+            return [IsAdminOrManagerOrAccountantOrHR()]
         return [permissions.IsAuthenticated()]
 
     def get_queryset(self):
         """Get queryset based on user role"""
         user = self.request.user
         
-        if user.is_admin:
+        if user.is_admin or user.is_hr:
             # Admin can see all shifts
             return Shift.objects.all()
         elif user.is_manager:
@@ -4451,20 +5028,20 @@ class EmployeeShiftAssignmentViewSet(viewsets.ModelViewSet):
         return Response(serializer.data)
 
     def get_permissions(self):
-        if self.action in ['create', 'update', 'partial_update', 'destroy']:
-            return [IsAdminOrManager()]  # Only admin or manager can modify assignments
+        if self.action in ['create', 'update', 'partial_update', 'destroy', 'bulk_assign']:
+            return [IsAdminOrManagerOrHRNoDelete()]
         elif self.action in ['list', 'retrieve']:
-            return [IsAdminOrManagerOrAccountant()]  # Admin, manager, and accountant can view
+            return [IsAdminOrManagerOrAccountantOrHR()]
         return [permissions.IsAuthenticated()]
 
     def get_queryset(self):
         """Get queryset based on user role"""
         user = self.request.user
         
-        if user.is_admin:
+        if user.is_admin or user.is_hr:
             # Admin can see all assignments
             queryset = EmployeeShiftAssignment.objects.all()
-            logger.info(f"EmployeeShiftAssignmentViewSet - Admin: returning {queryset.count()} assignments")
+            logger.info(f"EmployeeShiftAssignmentViewSet - Admin/HR: returning {queryset.count()} assignments")
             return queryset
         elif user.is_manager:
             # Manager can only see assignments from their office

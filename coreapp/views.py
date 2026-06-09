@@ -9,7 +9,7 @@ from .serializers import (
     SalaryIncrementHistorySerializer,
     HolidaySerializer,  
 )
-from .permissions import IsAdminManagerOrSuperuser
+from .permissions import IsAdminManagerHRNoDeleteOrSuperuser, IsAdminManagerOrSuperuser
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework import filters
 from .filters import SalaryIncrementFilter, SalaryIncrementHistoryFilter, HolidayFilter
@@ -188,7 +188,7 @@ class HolidayViewSet(viewsets.ModelViewSet):
         """
         if self.action in ['list', 'retrieve']:
             return [IsAuthenticated()]
-        return [IsAuthenticated(), IsAdminManagerOrSuperuser()]
+        return [IsAuthenticated(), IsAdminManagerHRNoDeleteOrSuperuser()]
 
     def get_queryset(self):
         return super().get_queryset()

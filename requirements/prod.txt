@@ -4,6 +4,7 @@
 # Production Server
 # =========================
 gunicorn==21.2.0
+daphne>=4.1,<5.0
 
 # =========================
 # PDF Rendering (Linux only)

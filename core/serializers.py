@@ -34,7 +34,9 @@ from .models import (
     CustomUser, Office, Device, DeviceUser, Attendance, Leave, Document, 
     Notification, SystemSettings, AttendanceLog, ESSLAttendanceLog, 
     WorkingHoursSettings, DocumentTemplate, GeneratedDocument, Resignation,
-    Department, Designation, Salary, SalaryTemplate, Shift, EmployeeShiftAssignment
+    Department, Designation, Salary, SalaryTemplate, Shift, EmployeeShiftAssignment,
+    EmployeeStatusAuditLog, BiometricAssignmentHistory, AttendanceAuditLog,
+    DuplicatePunchAttempt, UnmatchedBiometricPunch
 )
 
 
@@ -134,14 +136,22 @@ class CustomUserSerializer(serializers.ModelSerializer):
             'id', 'username', 'email', 'first_name', 'last_name', 'full_name',
             'role', 'office', 'office_name', 'phone', 'address', 'date_of_birth',
             'gender', 'profile_picture', 'profile_picture_url', 'aadhaar_card', 'pan_card', 'employee_id', 'biometric_id', 'joining_date',
-            'department', 'department_name', 'designation', 'designation_name', 'salary', 'pay_bank_name', 'emergency_contact_name',
+            'department', 'department_name', 'designation', 'designation_name', 'salary', 'pay_bank_name',
+            'employment_status', 'exit_type', 'resignation_date', 'last_working_date',
+            'exit_date', 'exit_reason', 'final_settlement_status', 'rehire_eligible',
+            'archived_at', 'archived_by', 'status_changed_at', 'status_changed_by',
+            'status_change_remarks',
+            'emergency_contact_name',
             'emergency_contact_phone', 'emergency_contact_relationship',
             'account_holder_name', 'bank_name', 'account_number', 'ifsc_code', 'bank_branch_name',
             'upi_qr', 'bank_account_updated_at',
             'is_active', 'last_login', 'created_at', 'updated_at', 'password',
             'has_resignation', 'resignation_status'
         ]
-        read_only_fields = ('id', 'last_login', 'created_at', 'updated_at')
+        read_only_fields = (
+            'id', 'last_login', 'created_at', 'updated_at', 'archived_at',
+            'archived_by', 'status_changed_at', 'status_changed_by'
+        )
         extra_kwargs = {
             'password': {'write_only': True, 'required': False}
         }
@@ -282,6 +292,15 @@ class CustomUserListSerializer(serializers.ModelSerializer):
             'joining_date',
             'salary',
             'pay_bank_name',
+            'employment_status',
+            'exit_type',
+            'resignation_date',
+            'last_working_date',
+            'exit_date',
+            'final_settlement_status',
+            'rehire_eligible',
+            'archived_at',
+            'status_changed_at',
             'is_active',
             'has_resignation',
             'resignation_status',
@@ -303,6 +322,36 @@ class CustomUserListSerializer(serializers.ModelSerializer):
 
     def get_resignation_status(self, obj):
         return getattr(obj, 'latest_resignation_status', None)
+
+
+class EmployeeStatusAuditLogSerializer(serializers.ModelSerializer):
+    """Serializer for employee lifecycle status audit entries."""
+    employee_name = serializers.CharField(source='employee.get_full_name', read_only=True)
+    changed_by_name = serializers.CharField(source='changed_by.get_full_name', read_only=True)
+
+    class Meta:
+        model = EmployeeStatusAuditLog
+        fields = [
+            'id', 'employee', 'employee_name', 'old_status', 'new_status',
+            'changed_by', 'changed_by_name', 'reason', 'old_values',
+            'new_values', 'created_at'
+        ]
+        read_only_fields = fields
+
+
+class BiometricAssignmentHistorySerializer(serializers.ModelSerializer):
+    """Serializer for biometric ID assignment history."""
+    employee_name = serializers.CharField(source='employee.get_full_name', read_only=True)
+    changed_by_name = serializers.CharField(source='changed_by.get_full_name', read_only=True)
+
+    class Meta:
+        model = BiometricAssignmentHistory
+        fields = [
+            'id', 'employee', 'employee_name', 'old_biometric_id',
+            'new_biometric_id', 'changed_by', 'changed_by_name',
+            'reason', 'created_at'
+        ]
+        read_only_fields = fields
 
 
 class UserRegistrationSerializer(serializers.ModelSerializer):
@@ -417,9 +466,11 @@ class LeaveSerializer(serializers.ModelSerializer):
 
 class LeaveCreateSerializer(serializers.ModelSerializer):
     """Serializer for creating leave requests"""
+    user = serializers.PrimaryKeyRelatedField(queryset=CustomUser.objects.all(), required=False)
+
     class Meta:
         model = Leave
-        fields = ['leave_type', 'start_date', 'end_date', 'reason']
+        fields = ['user', 'leave_type', 'start_date', 'end_date', 'reason']
     
     def validate(self, attrs):
         start_date = attrs.get('start_date')
@@ -433,10 +484,14 @@ class LeaveCreateSerializer(serializers.ModelSerializer):
             delta = end_date - start_date
             attrs['total_days'] = delta.days + 1
         
+        request = self.context.get('request')
+        if attrs.get('user') and request and request.user.role not in ['admin', 'manager', 'hr']:
+            raise serializers.ValidationError({'user': 'You cannot create leave for another user.'})
+
         return attrs
     
     def create(self, validated_data):
-        validated_data['user'] = self.context['request'].user
+        validated_data['user'] = validated_data.get('user') or self.context['request'].user
         return super().create(validated_data)
 
 
@@ -589,6 +644,39 @@ class ESSLAttendanceLogSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = ESSLAttendanceLog
+        fields = '__all__'
+        read_only_fields = ('id', 'created_at')
+
+
+class DuplicatePunchAttemptSerializer(serializers.ModelSerializer):
+    """Serializer for duplicate biometric punch review records"""
+    device_name = serializers.CharField(source='device.name', read_only=True)
+
+    class Meta:
+        model = DuplicatePunchAttempt
+        fields = '__all__'
+        read_only_fields = ('id', 'created_at')
+
+
+class UnmatchedBiometricPunchSerializer(serializers.ModelSerializer):
+    """Serializer for unmatched biometric punch review records"""
+    device_name = serializers.CharField(source='device.name', read_only=True)
+    resolved_user_name = serializers.CharField(source='resolved_user.get_full_name', read_only=True)
+    resolved_by_name = serializers.CharField(source='resolved_by.get_full_name', read_only=True)
+
+    class Meta:
+        model = UnmatchedBiometricPunch
+        fields = '__all__'
+        read_only_fields = ('id', 'created_at')
+
+
+class AttendanceAuditLogSerializer(serializers.ModelSerializer):
+    """Serializer for detailed attendance audit history"""
+    employee_name = serializers.CharField(source='employee.get_full_name', read_only=True)
+    changed_by_name = serializers.CharField(source='changed_by.get_full_name', read_only=True)
+
+    class Meta:
+        model = AttendanceAuditLog
         fields = '__all__'
         read_only_fields = ('id', 'created_at')
 
@@ -845,6 +933,9 @@ class GeneratedDocumentSerializer(serializers.ModelSerializer):
     """Serializer for GeneratedDocument model"""
     employee_name = serializers.CharField(source='employee.get_full_name', read_only=True)
     employee_email = serializers.CharField(source='employee.email', read_only=True)
+    employee_employee_id = serializers.CharField(source='employee.employee_id', read_only=True)
+    employee_biometric_id = serializers.CharField(source='employee.biometric_id', read_only=True)
+    employee_office = serializers.CharField(source='employee.office.name', read_only=True)
     generated_by_name = serializers.CharField(source='generated_by.get_full_name', read_only=True)
     template_name = serializers.CharField(source='template.name', read_only=True)
     salary_month = serializers.SerializerMethodField()
@@ -853,9 +944,9 @@ class GeneratedDocumentSerializer(serializers.ModelSerializer):
         model = GeneratedDocument
         fields = [
             'id', 'employee', 'employee_name', 'employee_email', 'template', 'template_name',
-            'document_type', 'title', 'content', 'pdf_file', 'generated_by', 'generated_by_name',
-            'generated_at', 'sent_at', 'is_sent', 'offer_data', 'increment_data', 'salary_data',
-            'salary_month'
+            'employee_employee_id', 'employee_biometric_id', 'employee_office', 'document_type',
+            'title', 'content', 'pdf_file', 'generated_by', 'generated_by_name', 'generated_at',
+            'sent_at', 'is_sent', 'offer_data', 'increment_data', 'salary_data', 'salary_month'
         ]
         read_only_fields = ['id', 'generated_at']
 
@@ -910,6 +1001,9 @@ class GeneratedDocumentListSerializer(serializers.ModelSerializer):
     """Lightweight serializer for GeneratedDocument list view (excludes content)"""
     employee_name = serializers.CharField(source='employee.get_full_name', read_only=True)
     employee_email = serializers.CharField(source='employee.email', read_only=True)
+    employee_employee_id = serializers.CharField(source='employee.employee_id', read_only=True)
+    employee_biometric_id = serializers.CharField(source='employee.biometric_id', read_only=True)
+    employee_office = serializers.CharField(source='employee.office.name', read_only=True)
     generated_by_name = serializers.CharField(source='generated_by.get_full_name', read_only=True)
     template_name = serializers.CharField(source='template.name', read_only=True)
     salary_month = serializers.SerializerMethodField()
@@ -918,8 +1012,9 @@ class GeneratedDocumentListSerializer(serializers.ModelSerializer):
         model = GeneratedDocument
         fields = [
             'id', 'employee', 'employee_name', 'employee_email', 'template', 'template_name',
-            'document_type', 'title', 'pdf_file', 'generated_by', 'generated_by_name',
-            'generated_at', 'sent_at', 'is_sent', 'salary_month'
+            'employee_employee_id', 'employee_biometric_id', 'employee_office', 'document_type',
+            'title', 'pdf_file', 'generated_by', 'generated_by_name', 'generated_at', 'sent_at',
+            'is_sent', 'salary_month'
         ]
         read_only_fields = ['id', 'generated_at']
 
@@ -1513,6 +1608,11 @@ class SalaryReportSerializer(serializers.Serializer):
     department_id = serializers.UUIDField(required=False)
     year = serializers.IntegerField()
     month = serializers.IntegerField(min_value=1, max_value=12)
+    include_inactive = serializers.BooleanField(required=False, default=False)
+    employment_status = serializers.ChoiceField(
+        choices=CustomUser.EMPLOYMENT_STATUS_CHOICES,
+        required=False
+    )
     # Allow filtering by standard salary statuses plus a special 'no_salary' bucket
     status = serializers.ChoiceField(
         choices=list(Salary.SALARY_STATUS_CHOICES) + [('no_salary', 'No Salary')],

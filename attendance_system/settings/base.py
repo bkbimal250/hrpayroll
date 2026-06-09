@@ -65,6 +65,7 @@ ADMIN_THEME_APPS = [
 LOCAL_APPS = [
     'core.apps.CoreConfig',
     'coreapp.apps.CoreappConfig',
+    'interviewapp.apps.InterviewappConfig',
 ]
 
 # Combine all apps
@@ -229,7 +230,11 @@ CORS_ALLOWED_ORIGINS = [
     'https://res.cloudinary.com',
     
     'http://localhost:5173',
+    'http://localhost:5174',
+    'http://localhost:5175',
+    'http://127.0.0.1:5173',
     'http://127.0.0.1:5174',
+    'http://127.0.0.1:5175',
    
 ]
 CORS_ALLOWED_ORIGIN_REGEXES = [
@@ -257,7 +262,11 @@ CSRF_TRUSTED_ORIGINS = [
             'https://admindos.dishaonlinesolution.in,'
             'https://dosaccounts.dishaonlinesolution.in,'
             'http://localhost:5173,'
-            'http://127.0.0.1:5173'
+            'http://localhost:5174,'
+            'http://localhost:5175,'
+            'http://127.0.0.1:5173,'
+            'http://127.0.0.1:5174,'
+            'http://127.0.0.1:5175'
         )
     ).split(',')
     if origin.strip()

@@ -271,7 +271,8 @@ class ZKTecoService:
     
     def sync_attendance_to_database(self, attendance_logs: List[Dict], device_info: Dict):
         """Sync attendance logs to database"""
-        from core.models import ESSLAttendanceLog, CustomUser, Device
+        from core.attendance_processing import record_raw_punch
+        from core.models import Device
         
         synced_count = 0
         error_count = 0
@@ -298,30 +299,20 @@ class ZKTecoService:
                 
                 for log in batch:
                     try:
-                        # Find user by biometric ID
-                        user = CustomUser.objects.filter(biometric_id=str(log['user_id'])).first()
-                        
-                        if user:
-                            # Check if log already exists
-                            existing_log = ESSLAttendanceLog.objects.filter(
-                                device=device,
-                                biometric_id=str(log['user_id']),
-                                punch_time=log['punch_time']
-                            ).first()
-                            
-                            if not existing_log:
-                                # Create new attendance log
-                                ESSLAttendanceLog.objects.create(
-                                    device=device,
-                                    biometric_id=str(log['user_id']),
-                                    user=user,
-                                    punch_time=log['punch_time'],
-                                    punch_type=log['punch_type'],
-                                    is_processed=False
-                                )
-                                synced_count += 1
-                        else:
-                            logger.warning(f"User with biometric ID {log['user_id']} not found")
+                        raw_log, created, result = record_raw_punch(
+                            device=device,
+                            biometric_id=log['user_id'],
+                            device_user_id=log.get('uid') or log['user_id'],
+                            employee_id=str(log.get('employee_id') or ''),
+                            punch_time=log['punch_time'],
+                            punch_type=log.get('punch_type', 'in'),
+                            source='zkteco_fetch',
+                            raw_payload=log,
+                        )
+                        if created:
+                            synced_count += 1
+                        if result == 'unmatched':
+                            logger.warning(f"Unmatched ZKTeco punch for biometric ID {log['user_id']}")
                             
                     except Exception as e:
                         logger.error(f"Error processing attendance log: {str(e)}")

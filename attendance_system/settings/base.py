@@ -225,6 +225,7 @@ CORS_ALLOWED_ORIGINS = [
     'https://dosapi.attendance.dishaonliesolution.workspa.in',
     'https://dosemployees.dishaonlinesolution.in',
     'https://dosmanagers.dishaonlinesolution.in',
+    'https://hr.hiring.dishaonlinesolution.in',
     'https://admindos.dishaonlinesolution.in',
     'https://dosaccounts.dishaonlinesolution.in',
     'https://res.cloudinary.com',
@@ -261,6 +262,7 @@ CSRF_TRUSTED_ORIGINS = [
             'https://dosmanagers.dishaonlinesolution.in,'
             'https://admindos.dishaonlinesolution.in,'
             'https://dosaccounts.dishaonlinesolution.in,'
+            'https://hr.hiring.dishaonlinesolution.in,'
             'http://localhost:5173,'
             'http://localhost:5174,'
             'http://localhost:5175,'
@@ -380,6 +382,7 @@ WEBSOCKET_ALLOWED_ORIGINS = [
             'https://dosmanagers.dishaonlinesolution.in,'
             'https://admindos.dishaonlinesolution.in,'
             'https://dosaccounts.dishaonlinesolution.in,'
+            'https://hr.hiring.dishaonlinesolution.in,'
             'http://localhost:5173,'
             'http://127.0.0.1:5173'
         )

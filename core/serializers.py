@@ -35,7 +35,7 @@ from .models import (
     Notification, SystemSettings, AttendanceLog, ESSLAttendanceLog, 
     WorkingHoursSettings, DocumentTemplate, GeneratedDocument, Resignation,
     Department, Designation, Salary, SalaryTemplate, Shift, EmployeeShiftAssignment,
-    EmployeeStatusAuditLog, BiometricAssignmentHistory, AttendanceAuditLog,
+    EmployeeStatusAuditLog, BiometricAssignmentHistory, PasswordChangeHistory, AttendanceAuditLog,
     DuplicatePunchAttempt, UnmatchedBiometricPunch
 )
 
@@ -350,6 +350,20 @@ class BiometricAssignmentHistorySerializer(serializers.ModelSerializer):
             'id', 'employee', 'employee_name', 'old_biometric_id',
             'new_biometric_id', 'changed_by', 'changed_by_name',
             'reason', 'created_at'
+        ]
+        read_only_fields = fields
+
+
+class PasswordChangeHistorySerializer(serializers.ModelSerializer):
+    """Serializer for privileged password reset audit entries."""
+    employee_name = serializers.CharField(source='employee.get_full_name', read_only=True)
+    changed_by_name = serializers.CharField(source='changed_by.get_full_name', read_only=True)
+
+    class Meta:
+        model = PasswordChangeHistory
+        fields = [
+            'id', 'employee', 'employee_name', 'changed_by',
+            'changed_by_name', 'changed_by_role', 'reason', 'created_at'
         ]
         read_only_fields = fields
 

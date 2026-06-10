@@ -445,6 +445,36 @@ class BiometricAssignmentHistory(models.Model):
             return f"Biometric ID: {self.old_biometric_id} -> {self.new_biometric_id}"
 
 
+class PasswordChangeHistory(models.Model):
+    """Audit trail for privileged password resets."""
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    employee = models.ForeignKey(CustomUser, on_delete=models.CASCADE, related_name='password_change_history')
+    changed_by = models.ForeignKey(
+        CustomUser,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='password_changes_made',
+    )
+    reason = models.TextField()
+    changed_by_role = models.CharField(max_length=20, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['employee', '-created_at']),
+            models.Index(fields=['changed_by', '-created_at']),
+        ]
+
+    def __str__(self):
+        try:
+            actor = self.changed_by.get_full_name() if self.changed_by else 'System'
+            return f"Password reset for {self.employee.get_full_name()} by {actor}"
+        except Exception:
+            return "Password reset history"
+
+
 
 class BankAccountHistory(models.Model):
     """Track all bank account changes for audit purposes"""

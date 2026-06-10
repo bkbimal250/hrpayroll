@@ -16,13 +16,14 @@ import logging
 import traceback
 import sys
 from django.core.exceptions import ValidationError
+from django.contrib.auth.password_validation import validate_password
 from rest_framework.exceptions import APIException, ValidationError as DRFValidationError
 
 from .models import (
     CustomUser, Office, Device, DeviceUser, Attendance, WorkingHoursSettings, 
     ESSLAttendanceLog, Leave, Document, Notification, SystemSettings,
     DocumentTemplate, GeneratedDocument, Resignation, Department, Designation,
-    Shift, EmployeeShiftAssignment, EmployeeStatusAuditLog, BiometricAssignmentHistory, Salary,
+    Shift, EmployeeShiftAssignment, EmployeeStatusAuditLog, BiometricAssignmentHistory, PasswordChangeHistory, Salary,
     AttendanceAuditLog, DuplicatePunchAttempt, UnmatchedBiometricPunch
 )
 from .serializers import (
@@ -37,8 +38,8 @@ from .serializers import (
     GeneratedDocumentSerializer, DocumentGenerationSerializer, ResignationSerializer,
     ResignationCreateSerializer, ResignationApprovalSerializer, DepartmentSerializer, DesignationSerializer,
     ShiftSerializer, EmployeeShiftAssignmentSerializer, EmployeeStatusAuditLogSerializer,
-    BiometricAssignmentHistorySerializer, AttendanceAuditLogSerializer, DuplicatePunchAttemptSerializer,
-    UnmatchedBiometricPunchSerializer
+    BiometricAssignmentHistorySerializer, PasswordChangeHistorySerializer, AttendanceAuditLogSerializer,
+    DuplicatePunchAttemptSerializer, UnmatchedBiometricPunchSerializer
 )
 # Permissions are defined inline in this file
 from .zkteco_service import zkteco_service
@@ -86,7 +87,7 @@ class IsAdminOrManagerOrHR(IsAuthenticated):
     """Permission to allow admin, manager, or HR users."""
     def has_permission(self, request, view):
         return super().has_permission(request, view) and (
-            request.user.is_admin or request.user.is_manager or request.user.is_hr
+            request.user.is_superuser or request.user.is_admin or request.user.is_manager or request.user.is_hr
         )
 
 
@@ -1079,6 +1080,8 @@ class CustomUserViewSet(viewsets.ModelViewSet):
             'archive', 'restore'
         ]:
             return [IsAdminOrManagerOrHRNoDelete()]
+        elif self.action in ['reset_password']:
+            return [IsAdminOrManagerOrHR()]
         elif self.action in ['list', 'retrieve', 'by_status', 'all_search', 'full_history']:
             return [IsAdminOrManagerOrAccountantOrHR()]
         return [permissions.IsAuthenticated()]
@@ -1096,6 +1099,7 @@ class CustomUserViewSet(viewsets.ModelViewSet):
             'shift_assignments': EmployeeShiftAssignment.objects.filter(employee=employee).count(),
             'status_audit_logs': EmployeeStatusAuditLog.objects.filter(employee=employee).count(),
             'biometric_assignment_history': BiometricAssignmentHistory.objects.filter(employee=employee).count(),
+            'password_change_history': PasswordChangeHistory.objects.filter(employee=employee).count(),
         }
 
     def _change_employee_status(self, employee, new_status, request, **defaults):
@@ -1207,6 +1211,45 @@ class CustomUserViewSet(viewsets.ModelViewSet):
             exit_date=None,
         )
 
+    @action(detail=True, methods=['post'])
+    def reset_password(self, request, pk=None):
+        """Privileged password reset for admin, HR, manager, or superuser users."""
+        employee = self.get_object()
+        actor = request.user
+
+        if not (actor.is_superuser or actor.is_admin or actor.is_hr or actor.is_manager):
+            return Response({'error': 'You do not have permission to reset passwords.'}, status=status.HTTP_403_FORBIDDEN)
+
+        new_password = request.data.get('new_password') or request.data.get('password')
+        confirm_password = request.data.get('confirm_password') or request.data.get('password_confirm') or new_password
+        reason = (request.data.get('reason') or request.data.get('password_change_reason') or '').strip()
+
+        if not new_password:
+            return Response({'new_password': 'New password is required.'}, status=status.HTTP_400_BAD_REQUEST)
+        if new_password != confirm_password:
+            return Response({'confirm_password': 'Passwords do not match.'}, status=status.HTTP_400_BAD_REQUEST)
+        if not reason:
+            return Response({'reason': 'Reason is required for password reset history.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            validate_password(new_password, user=employee)
+        except ValidationError as exc:
+            return Response({'new_password': list(exc.messages)}, status=status.HTTP_400_BAD_REQUEST)
+
+        employee.set_password(new_password)
+        employee.save(update_fields=['password', 'updated_at'])
+        PasswordChangeHistory.objects.create(
+            employee=employee,
+            changed_by=actor,
+            changed_by_role=getattr(actor, 'role', '') or ('superuser' if actor.is_superuser else ''),
+            reason=reason,
+        )
+
+        return Response({
+            'message': 'Password updated successfully. History preserved.',
+            'employee_id': str(employee.id),
+        })
+
     @action(detail=False, methods=['get'])
     def by_status(self, request):
         lifecycle_status = request.query_params.get('employment_status') or request.query_params.get('status')
@@ -1281,6 +1324,11 @@ class CustomUserViewSet(viewsets.ModelViewSet):
             ).data,
             'biometric_assignment_history': BiometricAssignmentHistorySerializer(
                 BiometricAssignmentHistory.objects.filter(employee=employee),
+                many=True,
+                context={'request': request},
+            ).data,
+            'password_change_history': PasswordChangeHistorySerializer(
+                PasswordChangeHistory.objects.filter(employee=employee),
                 many=True,
                 context={'request': request},
             ).data,

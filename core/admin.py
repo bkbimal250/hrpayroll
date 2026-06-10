@@ -16,7 +16,7 @@ from .models import (
     Notification, SystemSettings, AttendanceLog, ESSLAttendanceLog, 
     WorkingHoursSettings, Resignation, DocumentTemplate, GeneratedDocument,
     Department, Designation, Shift, EmployeeShiftAssignment, BankAccountHistory,
-    EmployeeStatusAuditLog, BiometricAssignmentHistory, AttendanceAuditLog,
+    EmployeeStatusAuditLog, BiometricAssignmentHistory, PasswordChangeHistory, AttendanceAuditLog,
     DuplicatePunchAttempt, UnmatchedBiometricPunch
 )
 
@@ -78,7 +78,7 @@ class DesignationAdmin(UnfoldModelAdmin):
     search_fields = ['name', 'description', 'department__name']
     ordering = ['department__name', 'name']
     readonly_fields = ['id', 'created_at', 'updated_at']
-    
+
     fieldsets = (
         (None, {'fields': ('name', 'department', 'description', 'is_active')}),
         ('Timestamps', {'fields': ('created_at', 'updated_at')}),
@@ -101,6 +101,20 @@ class DesignationAdmin(UnfoldModelAdmin):
         updated = queryset.update(is_active=False)
         self.message_user(request, f'{updated} designations deactivated.')
     deactivate_designations.short_description = "Deactivate selected designations"
+
+
+@admin.register(PasswordChangeHistory)
+class PasswordChangeHistoryAdmin(UnfoldModelAdmin):
+    list_display = ['employee', 'changed_by', 'changed_by_role', 'created_at']
+    list_filter = ['changed_by_role', 'created_at']
+    search_fields = ['employee__username', 'employee__first_name', 'employee__last_name', 'changed_by__username', 'reason']
+    readonly_fields = ['id', 'employee', 'changed_by', 'changed_by_role', 'reason', 'created_at']
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
 
 
 class CustomUserChangeForm(forms.ModelForm):
@@ -428,6 +442,12 @@ class SafeCustomUserAdmin(BaseUserAdmin, UnfoldModelAdmin):
         for user in queryset:
             user.set_password(default_password)
             user.save()
+            PasswordChangeHistory.objects.create(
+                employee=user,
+                changed_by=request.user,
+                changed_by_role=getattr(request.user, 'role', '') or ('superuser' if request.user.is_superuser else ''),
+                reason='Bulk reset to default password from Django admin.',
+            )
             count += 1
         
         from django.contrib import messages
@@ -479,6 +499,12 @@ class SafeCustomUserAdmin(BaseUserAdmin, UnfoldModelAdmin):
                 from django.contrib import messages
                 messages.success(request, f'User "{obj.username}" updated successfully. Password was preserved.')
             else:
+                PasswordChangeHistory.objects.create(
+                    employee=obj,
+                    changed_by=request.user,
+                    changed_by_role=getattr(request.user, 'role', '') or ('superuser' if request.user.is_superuser else ''),
+                    reason='Password changed from Django admin user form.',
+                )
                 from django.contrib import messages
                 messages.success(request, f'User "{obj.username}" updated successfully. Password was changed.')
     

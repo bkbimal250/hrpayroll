@@ -20,7 +20,7 @@ from .models import (
     Salary, SalaryTemplate, CustomUser, Office, Department, Designation, Attendance
 )
 from .serializers import (
-    SalarySerializer, SalaryCreateSerializer, SalaryUpdateSerializer,
+    SalarySerializer, SalaryListSerializer, SalaryCreateSerializer, SalaryUpdateSerializer,
     SalaryApprovalSerializer, SalaryPaymentSerializer, SalaryTemplateSerializer,
     SalaryTemplateCreateSerializer, SalaryBulkCreateSerializer, SalaryReportSerializer,
     SalarySummarySerializer, SalaryAutoCalculateSerializer
@@ -48,6 +48,11 @@ class SalaryListView(generics.ListCreateAPIView):
     ]
     ordering = ['-salary_month', '-created_at']
     # pagination_class = None  # Use default pagination
+
+    def get_serializer_class(self):
+        if self.request.method == 'POST':
+            return SalaryCreateSerializer
+        return SalaryListSerializer
 
     def get_queryset(self):
         """Filter salaries based on user role and permissions"""
@@ -116,7 +121,8 @@ class SalaryListView(generics.ListCreateAPIView):
     def list(self, request, *args, **kwargs):
         response = super().list(request, *args, **kwargs)
 
-        if isinstance(response.data, dict):
+        include_filter_options = request.query_params.get('include_filter_options') in ['true', '1', 'yes']
+        if include_filter_options and isinstance(response.data, dict):
             base_queryset = self.filter_queryset(self.get_queryset())
             response.data['filter_options'] = {
                 'offices': list(

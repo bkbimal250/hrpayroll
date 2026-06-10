@@ -30,8 +30,9 @@ from .serializers import (
     CustomUserSerializer, CustomUserListSerializer, OfficeSerializer, DeviceSerializer, DeviceUserSerializer,
     DeviceUserCreateSerializer, DeviceUserMappingSerializer, DeviceUserBulkCreateSerializer,
     AttendanceSerializer, AttendanceCreateSerializer, BulkAttendanceSerializer, WorkingHoursSettingsSerializer,
-    ESSLAttendanceLogSerializer, LeaveSerializer, LeaveCreateSerializer, LeaveApprovalSerializer,
-    DocumentSerializer, DocumentCreateSerializer, NotificationSerializer, SystemSettingsSerializer,
+    ESSLAttendanceLogSerializer, LeaveSerializer, LeaveListSerializer, LeaveCreateSerializer, LeaveApprovalSerializer,
+    DocumentSerializer, DocumentListSerializer, DocumentCreateSerializer,
+    NotificationSerializer, NotificationListSerializer, SystemSettingsSerializer,
     UserRegistrationSerializer, UserProfileSerializer, PasswordChangeSerializer,
     DashboardStatsSerializer, AttendanceLogSerializer, OfficeStatsSerializer,
     UserLoginSerializer, DeviceSyncSerializer, DocumentTemplateSerializer, 
@@ -635,8 +636,8 @@ class ReportsViewSet(viewsets.ViewSet):
             office_id = request.query_params.get('office')
             user_id = request.query_params.get('user')
             
-            logger.info(f" Monthly summary request - Year: {year}, Month: {month}, Office: {office_id}, User: {user_id}")
-            logger.info(f" All query params: {dict(request.query_params)}")
+            logger.debug(f"Monthly summary request - Year: {year}, Month: {month}, Office: {office_id}, User: {user_id}")
+            logger.debug(f"Monthly summary query params: {dict(request.query_params)}")
 
             # Convert to integers
             if year:
@@ -665,97 +666,67 @@ class ReportsViewSet(viewsets.ViewSet):
                 users_query = users_query.filter(employment_status=employment_status)
             elif not include_inactive:
                 users_query = users_query.filter(employment_status__in=['active', 'notice_period'])
-            total_users_before_filter = users_query.count()
             
             if office_id:
                 users_query = users_query.filter(office_id=office_id)
-                logger.info(f" Filtering by office_id: {office_id}")
-            
-            users = users_query.select_related('office')
-            total_users_after_filter = users.count()
-            
-            logger.info(f" Users count - Before filter: {total_users_before_filter}, After filter: {total_users_after_filter}")
-            
+                logger.debug(f"Filtering monthly summary by office_id: {office_id}")
+            if user_id:
+                users_query = users_query.filter(id=user_id)
+
+            total_days = (end_date - start_date).days + 1
+            users = list(
+                users_query
+                .select_related('office')
+                .values('id', 'first_name', 'last_name', 'employee_id', 'office__name')
+            )
+            user_ids = [user['id'] for user in users]
+
+            attendance_stats = Attendance.objects.filter(
+                user_id__in=user_ids,
+                date__range=[start_date, end_date]
+            ).values('user_id').annotate(
+                attended_days=Count('id'),
+                present_days=Count('id', filter=Q(status='present')),
+                late_days=Count('id', filter=Q(status='late')),
+                half_days=Count('id', filter=Q(status='half_day')),
+                recorded_holiday_days=Count('id', filter=Q(status='holiday')),
+                attended_holiday_dates=Count('date', filter=Q(date__in=holidays_in_month), distinct=True),
+                total_hours_sum=Sum('total_hours'),
+            )
+            stats_by_user = {item['user_id']: item for item in attendance_stats}
+
             report_data = []
             for user in users:
-                # Get attendance records for the month
-                attendance_records = Attendance.objects.filter(
-                    user=user,
-                    date__range=[start_date, end_date]
-                )
-                
-                # Calculate statistics
-                total_days = (end_date - start_date).days + 1
-                present_days = attendance_records.filter(status='present').count()
-                late_days = attendance_records.filter(status='late').count()
-                half_days = attendance_records.filter(status='half_day').count()
-                recorded_holiday_days = attendance_records.filter(status='holiday').count()
-                
-                # Check for holidays that don't have an attendance record yet
-                attended_dates = set(attendance_records.values_list('date', flat=True))
-                missing_holiday_dates = holidays_in_month - attended_dates
-                
-                holiday_days = recorded_holiday_days + len(missing_holiday_dates)
-                
-                # Calculate absent days - days without attendance records or with absent status, 
-                # excluding holidays and future/upcoming days
-                today = date.today()
-                attended_days_count = attendance_records.count()
-                
-                # Inferred absent = total days so far - attended days - holidays so far
-                # But let's keep it simple: total_days - attended_days - missing holidays
-                absent_days = total_days - attended_days_count - len(missing_holiday_dates)
-                
-                # If there are records with 'absent' status, they are already in attended_days_count
-                # and would be counted as "not present". Wait, let's be more precise.
-                
-                # Explicit absent: records with status='absent'
-                explicit_absent_days = attendance_records.filter(status='absent').count()
-                
-                # Truly absent = (Total days passed - attended non-absent days - holidays passed)
-                # For simplicity, we'll use:
-                absent_days = max(0, absent_days)
-                
-                # Log the calculation for debugging
-                logger.info(f"User {user.get_full_name()}: total_days={total_days}, attended_days={attended_days_count}, explicit_absent={explicit_absent_days}, calculated_absent={absent_days}")
-                
-                # Calculate total hours - convert to float to avoid decimal type issues
-                try:
-                    total_hours = sum([
-                        float(record.total_hours or 0) 
-                        for record in attendance_records 
-                        if record.total_hours is not None
-                    ])
-                except (TypeError, ValueError):
-                    # Fallback if there are any type conversion issues
-                    total_hours = 0.0
-                
-                # Calculate attendance percentage
+                user_stats = stats_by_user.get(user['id'], {})
+                attended_days = user_stats.get('attended_days') or 0
+                present_days = user_stats.get('present_days') or 0
+                late_days = user_stats.get('late_days') or 0
+                half_days = user_stats.get('half_days') or 0
+                recorded_holiday_days = user_stats.get('recorded_holiday_days') or 0
+                attended_holiday_dates = user_stats.get('attended_holiday_dates') or 0
+                missing_holiday_days = max(0, total_holidays - attended_holiday_dates)
+                holiday_days = recorded_holiday_days + missing_holiday_days
+                absent_days = max(0, total_days - attended_days - missing_holiday_days)
+                total_hours_value = float(user_stats.get('total_hours_sum') or 0)
                 attendance_percentage = (present_days / total_days * 100) if total_days > 0 else 0
-                
+                full_name = f"{user.get('first_name') or ''} {user.get('last_name') or ''}".strip()
+
                 report_data.append({
-                    'user_id': user.id,
-                    'user_name': user.get_full_name(),
-                    'employee_id': user.employee_id,
-                    'office': user.office.name if user.office else '',
+                    'user_id': str(user['id']),
+                    'user_name': full_name,
+                    'employee_id': user.get('employee_id') or '',
+                    'office': user.get('office__name') or '',
                     'total_days': total_days,
                     'present_days': present_days,
                     'absent_days': absent_days,
                     'holiday_days': holiday_days,
                     'late_days': late_days,
                     'half_days': half_days,
-                    'total_hours': round(total_hours, 2),
+                    'total_hours': round(total_hours_value, 2),
                     'attendance_percentage': round(attendance_percentage, 2),
-                    'standard_hours': 9.0 * total_days,  # 9 hours per day
-                    'hours_deficit': max(0, (9.0 * total_days) - total_hours)
+                    'standard_hours': 9.0 * total_days,
+                    'hours_deficit': max(0, (9.0 * total_days) - total_hours_value)
                 })
-
-            # Filter by specific user if requested
-            if user_id:
-                report_data = [
-                    record for record in report_data 
-                    if str(record['user_id']) == str(user_id)
-                ]
 
             # Calculate overall statistics
             if report_data:
@@ -773,7 +744,7 @@ class ReportsViewSet(viewsets.ViewSet):
                     total_hours = 0.0
                     avg_attendance = 0.0
             else:
-                total_present = total_absent = total_late = total_hours = avg_attendance = 0
+                total_present = total_absent = total_holiday = total_late = total_hours = avg_attendance = 0
 
             return Response({
                 'type': 'monthly_summary',
@@ -3308,7 +3279,7 @@ class LeaveViewSet(viewsets.ModelViewSet):
             'user__designation', 
             'user__office',
             'approved_by'
-        ).prefetch_related('user__department', 'user__designation')
+        )
         
         if user.is_admin or user.is_hr:
             return base_queryset
@@ -3329,6 +3300,8 @@ class LeaveViewSet(viewsets.ModelViewSet):
             return LeaveCreateSerializer
         elif self.action in ['approve', 'reject']:
             return LeaveApprovalSerializer
+        elif self.action == 'list':
+            return LeaveListSerializer
         return LeaveSerializer
 
     def perform_create(self, serializer):
@@ -3391,7 +3364,9 @@ class DocumentViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         user = self.request.user
-        base_queryset = Document.objects.select_related('user', 'user__office', 'uploaded_by')
+        base_queryset = Document.objects.select_related(
+            'user', 'user__office', 'user__department', 'user__designation', 'uploaded_by'
+        )
         
         if user.is_admin or user.is_hr:
             return base_queryset.all()
@@ -3411,6 +3386,8 @@ class DocumentViewSet(viewsets.ModelViewSet):
     def get_serializer_class(self):
         if self.action == 'create':
             return DocumentCreateSerializer
+        if self.action in ['list', 'my']:
+            return DocumentListSerializer
         return DocumentSerializer
     
     def get_serializer_context(self):
@@ -3538,6 +3515,7 @@ class NotificationViewSet(viewsets.ModelViewSet):
             queryset = Notification.objects.all()
         else:
             queryset = Notification.objects.filter(user=self.request.user)
+        queryset = queryset.select_related('user', 'created_by')
         
         # Filter out expired notifications
         queryset = queryset.filter(
@@ -3545,6 +3523,11 @@ class NotificationViewSet(viewsets.ModelViewSet):
         )
         
         return queryset
+
+    def get_serializer_class(self):
+        if self.action == 'list':
+            return NotificationListSerializer
+        return NotificationSerializer
 
     def get_permissions(self):
         """Set permissions based on action"""
@@ -3579,9 +3562,10 @@ class NotificationViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['get'])
     def unread_count(self, request):
         """Get unread notification count"""
-        from .notification_service import NotificationService
-        
-        count = NotificationService.get_unread_count(request.user)
+        queryset = Notification.objects.filter(is_read=False)
+        if not request.user.is_hr:
+            queryset = queryset.filter(user=request.user)
+        count = queryset.count()
         return Response({'unread_count': count})
 
     def destroy(self, request, pk=None):

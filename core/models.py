@@ -1332,6 +1332,13 @@ class GeneratedDocument(models.Model):
     class Meta:
         verbose_name_plural = "Generated Documents"
         ordering = ['-generated_at']
+        indexes = [
+            models.Index(fields=['generated_at'], name='gen_doc_generated_at_idx'),
+            models.Index(fields=['document_type'], name='gen_doc_type_idx'),
+            models.Index(fields=['is_sent'], name='gen_doc_is_sent_idx'),
+            models.Index(fields=['template'], name='gen_doc_template_idx'),
+            models.Index(fields=['employee', 'generated_at'], name='gen_doc_emp_generated_idx'),
+        ]
 
     def __str__(self):
         try:

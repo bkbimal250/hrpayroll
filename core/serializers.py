@@ -478,6 +478,37 @@ class LeaveSerializer(serializers.ModelSerializer):
         read_only_fields = ('id', 'approved_at', 'created_at', 'updated_at')
 
 
+class LightweightUserSummarySerializer(serializers.ModelSerializer):
+    """Small user payload for list/table rows."""
+    full_name = serializers.CharField(source='get_full_name', read_only=True)
+    office_name = serializers.CharField(source='office.name', read_only=True)
+    department_name = serializers.CharField(source='department.name', read_only=True)
+    designation_name = serializers.CharField(source='designation.name', read_only=True)
+
+    class Meta:
+        model = CustomUser
+        fields = [
+            'id', 'full_name', 'first_name', 'last_name', 'employee_id',
+            'email', 'office_name', 'department_name', 'designation_name'
+        ]
+
+
+class LeaveListSerializer(serializers.ModelSerializer):
+    """Lightweight leave serializer for paginated list responses."""
+    user = LightweightUserSummarySerializer(read_only=True)
+    user_name = serializers.CharField(source='user.get_full_name', read_only=True)
+    approved_by_name = serializers.CharField(source='approved_by.get_full_name', read_only=True)
+
+    class Meta:
+        model = Leave
+        fields = [
+            'id', 'user', 'user_name', 'leave_type', 'start_date', 'end_date',
+            'total_days', 'reason', 'status', 'approved_by', 'approved_by_name',
+            'approved_at', 'rejection_reason', 'created_at', 'updated_at'
+        ]
+        read_only_fields = fields
+
+
 class LeaveCreateSerializer(serializers.ModelSerializer):
     """Serializer for creating leave requests"""
     user = serializers.PrimaryKeyRelatedField(queryset=CustomUser.objects.all(), required=False)
@@ -599,6 +630,30 @@ class DocumentSerializer(serializers.ModelSerializer):
         return "N/A"
 
 
+class DocumentListSerializer(serializers.ModelSerializer):
+    """Lightweight document serializer for table/list responses."""
+    user = LightweightUserSummarySerializer(read_only=True)
+    user_name = serializers.CharField(source='user.get_full_name', read_only=True)
+    uploaded_by_name = serializers.CharField(source='uploaded_by.get_full_name', read_only=True)
+    file_url = serializers.SerializerMethodField()
+    file_type = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Document
+        fields = [
+            'id', 'title', 'document_type', 'description', 'user', 'user_name',
+            'uploaded_by', 'uploaded_by_name', 'created_at', 'updated_at',
+            'file_url', 'file_type'
+        ]
+        read_only_fields = fields
+
+    def get_file_url(self, obj):
+        return DocumentSerializer.get_file_url(self, obj)
+
+    def get_file_type(self, obj):
+        return DocumentSerializer.get_file_type(self, obj)
+
+
 class DocumentCreateSerializer(serializers.ModelSerializer):
     """Serializer for creating documents"""
     class Meta:
@@ -631,6 +686,22 @@ class NotificationSerializer(serializers.ModelSerializer):
             'created_by', 'created_by_name', 'created_at', 'updated_at', 'is_expired'
         ]
         read_only_fields = ('id', 'created_at', 'updated_at', 'is_expired')
+
+
+class NotificationListSerializer(serializers.ModelSerializer):
+    """Lightweight notification serializer for list responses."""
+    user_name = serializers.CharField(source='user.get_full_name', read_only=True)
+    created_by_name = serializers.CharField(source='created_by.get_full_name', read_only=True)
+    is_expired = serializers.BooleanField(read_only=True)
+
+    class Meta:
+        model = Notification
+        fields = [
+            'id', 'user', 'user_name', 'title', 'message', 'notification_type',
+            'category', 'priority', 'is_read', 'action_url', 'action_text',
+            'created_by', 'created_by_name', 'created_at', 'is_expired'
+        ]
+        read_only_fields = fields
 
 
 class SystemSettingsSerializer(serializers.ModelSerializer):
@@ -1014,27 +1085,20 @@ class GeneratedDocumentSerializer(serializers.ModelSerializer):
 class GeneratedDocumentListSerializer(serializers.ModelSerializer):
     """Lightweight serializer for GeneratedDocument list view (excludes content)"""
     employee_name = serializers.CharField(source='employee.get_full_name', read_only=True)
-    employee_email = serializers.CharField(source='employee.email', read_only=True)
     employee_employee_id = serializers.CharField(source='employee.employee_id', read_only=True)
-    employee_biometric_id = serializers.CharField(source='employee.biometric_id', read_only=True)
     employee_office = serializers.CharField(source='employee.office.name', read_only=True)
     generated_by_name = serializers.CharField(source='generated_by.get_full_name', read_only=True)
     template_name = serializers.CharField(source='template.name', read_only=True)
-    salary_month = serializers.SerializerMethodField()
     
     class Meta:
         model = GeneratedDocument
         fields = [
-            'id', 'employee', 'employee_name', 'employee_email', 'template', 'template_name',
-            'employee_employee_id', 'employee_biometric_id', 'employee_office', 'document_type',
-            'title', 'pdf_file', 'generated_by', 'generated_by_name', 'generated_at', 'sent_at',
-            'is_sent', 'salary_month'
+            'id', 'employee', 'employee_name', 'employee_employee_id',
+            'employee_office', 'template', 'template_name', 'document_type',
+            'title', 'generated_by', 'generated_by_name', 'generated_at',
+            'sent_at', 'is_sent'
         ]
         read_only_fields = ['id', 'generated_at']
-
-    def get_salary_month(self, obj):
-        """Extract or calculate the salary month for a generated document"""
-        return GeneratedDocumentSerializer.get_salary_month(self, obj)
 
 
 class DocumentGenerationSerializer(serializers.Serializer):
@@ -1450,6 +1514,33 @@ class SalarySerializer(serializers.ModelSerializer):
             raise serializers.ValidationError('Basic pay must be greater than zero.')
         
         return attrs
+
+
+class SalaryListSerializer(serializers.ModelSerializer):
+    """Lightweight salary serializer for list/table responses."""
+    employee_name = serializers.CharField(source='employee.get_full_name', read_only=True)
+    employee_employee_id = serializers.CharField(source='employee.employee_id', read_only=True)
+    employee_office_name = serializers.CharField(source='employee.office.name', read_only=True)
+    employee_department_name = serializers.CharField(source='employee.department.name', read_only=True)
+    employee_designation_name = serializers.CharField(source='employee.designation.name', read_only=True)
+    approved_by_name = serializers.CharField(source='approved_by.get_full_name', read_only=True)
+    created_by_name = serializers.CharField(source='created_by.get_full_name', read_only=True)
+
+    class Meta:
+        model = Salary
+        fields = [
+            'id', 'employee', 'employee_name', 'employee_employee_id',
+            'employee_office_name', 'employee_department_name',
+            'employee_designation_name', 'basic_pay', 'per_day_pay',
+            'increment', 'total_days', 'worked_days', 'deduction',
+            'balance_loan', 'previous_month_salary', 'remaining_pay',
+            'salary_month', 'pay_date', 'paid_date', 'payment_method',
+            'Bank_name', 'status', 'approved_by', 'approved_by_name',
+            'approved_at', 'created_by', 'created_by_name', 'created_at',
+            'updated_at', 'final_salary', 'gross_salary', 'net_salary',
+            'final_payable_amount'
+        ]
+        read_only_fields = fields
 
 
 class SalaryCreateSerializer(serializers.ModelSerializer):

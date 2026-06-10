@@ -170,7 +170,24 @@ class GeneratedDocumentViewSet(viewsets.ModelViewSet):
         else:
             # Employees and accountants can only see their own documents
             queryset = GeneratedDocument.objects.filter(employee=user)
-            
+
+        queryset = queryset.select_related(
+            'employee', 'employee__office', 'template', 'generated_by'
+        )
+
+        if self.action == 'list':
+            queryset = queryset.only(
+                'id', 'employee_id', 'template_id', 'generated_by_id',
+                'document_type', 'title', 'generated_at', 'sent_at', 'is_sent',
+                'employee__id', 'employee__first_name', 'employee__last_name',
+                'employee__employee_id', 'employee__office_id',
+                'employee__office__id', 'employee__office__name',
+                'template__id', 'template__name',
+                'generated_by__id', 'generated_by__first_name', 'generated_by__last_name',
+            )
+        else:
+            queryset = queryset.defer('template__template_content')
+
         return queryset
     
     @action(detail=True, methods=['get'])

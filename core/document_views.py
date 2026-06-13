@@ -1173,6 +1173,36 @@ class DocumentGenerationViewSet(viewsets.ViewSet):
         words = self.number_to_words(amount_int)
         return f"Rs. {formatted} ({words})"
 
+    def format_currency_amount(self, amount):
+        """Format currency amount for payslip display without repeating words."""
+        if amount is None:
+            return "Not specified"
+
+        try:
+            amount_value = float(amount)
+        except (ValueError, TypeError):
+            return str(amount) if amount is not None else "0"
+
+        return f"Rs. {amount_value:,.2f}"
+
+    def format_day_count(self, value):
+        """Format day counts cleanly for employee-facing document display."""
+        if value in [None, '']:
+            return "-"
+
+        try:
+            numeric_value = float(value)
+        except (ValueError, TypeError):
+            return value
+
+        if numeric_value < 0:
+            numeric_value = 0.0
+
+        if numeric_value.is_integer():
+            return str(int(numeric_value))
+
+        return f"{numeric_value:.2f}".rstrip('0').rstrip('.')
+
     def get_salary_slip_template(self):
         """Professional salary slip template from external file"""
         import os
@@ -1503,12 +1533,36 @@ class DocumentGenerationViewSet(viewsets.ViewSet):
                 total_deductions = float(salary_record.deduction or 0) + float(salary_record.balance_loan or 0)
                 final_salary = float(salary_record.final_salary or 0)
                 basic_pay = basic_salary
+                present_days = None
+                display_absent_days = None
                 
                 # Format month/year from salary_month date
                 months = ['January', 'February', 'March', 'April', 'May', 'June',
                           'July', 'August', 'September', 'October', 'November', 'December']
                 salary_month = months[salary_record.salary_month.month - 1]
                 salary_year = str(salary_record.salary_month.year)
+
+                try:
+                    from datetime import timedelta
+                    from django.db.models import Q
+                    from .models import Attendance
+
+                    period_start = salary_record.salary_month.replace(day=1)
+                    if period_start.month == 12:
+                        period_end = period_start.replace(year=period_start.year + 1, month=1, day=1) - timedelta(days=1)
+                    else:
+                        period_end = period_start.replace(month=period_start.month + 1, day=1) - timedelta(days=1)
+
+                    attendance_qs = Attendance.objects.filter(
+                        user=emp,
+                        date__range=[period_start, period_end]
+                    )
+                    present_days = attendance_qs.filter(status='present').count()
+                    display_absent_days = attendance_qs.filter(
+                        Q(status='absent') | Q(day_status='absent')
+                    ).distinct().count()
+                except Exception as e:
+                    logger.warning(f"Unable to fetch attendance summary for salary slip {salary_record.id}: {e}")
                 
                 # Employee details from DB
                 employee_name = emp.get_full_name()
@@ -1546,6 +1600,8 @@ class DocumentGenerationViewSet(viewsets.ViewSet):
                 total_deductions = float(data.get('total_deductions', 0))
                 final_salary = float(data.get('final_salary', 0))
                 basic_pay = float(data.get('basic_pay', 0))
+                present_days = data.get('present_days', data.get('attendance_present_days', None))
+                display_absent_days = data.get('absent_days', 0)
                 
                 salary_month = data.get('salary_month', '')
                 salary_year = data.get('salary_year', '')
@@ -1596,19 +1652,23 @@ class DocumentGenerationViewSet(viewsets.ViewSet):
                 'pf_number': pf_number,
                 'salary_month': salary_month,
                 'salary_year': salary_year,
-                'basic_salary': self.format_currency(basic_salary),
-                'extra_days_pay': self.format_currency(extra_days_pay),
-                'total_salary': self.format_currency(total_salary),
-                'net_salary': self.format_currency(net_salary),
-                'total_gross_salary': self.format_currency(total_gross_salary),
-                'gross_salary': self.format_currency(gross_salary),
-                'per_day_pay': self.format_currency(per_day_pay),
-                'basic_pay': self.format_currency(basic_pay),
-                'final_salary': self.format_currency(final_salary),
-                'total_deductions': self.format_currency(total_deductions),
+                'basic_salary': self.format_currency_amount(basic_salary),
+                'extra_days_pay': self.format_currency_amount(extra_days_pay),
+                'total_salary': self.format_currency_amount(total_salary),
+                'net_salary': self.format_currency_amount(net_salary),
+                'net_salary_words': self.number_to_words(int(float(net_salary or 0))),
+                'total_gross_salary': self.format_currency_amount(total_gross_salary),
+                'gross_salary': self.format_currency_amount(gross_salary),
+                'per_day_pay': self.format_currency_amount(per_day_pay),
+                'basic_pay': self.format_currency_amount(basic_pay),
+                'final_salary': self.format_currency_amount(final_salary),
+                'total_deductions': self.format_currency_amount(total_deductions),
                 'total_days': total_days,
-                'worked_days': worked_days,
-                'absent_days': absent_days,
+                'worked_days': self.format_day_count(worked_days),
+                'payable_days': self.format_day_count(worked_days),
+                'present_days': self.format_day_count(present_days),
+                'absent_days': self.format_day_count(absent_days),
+                'display_absent_days': self.format_day_count(display_absent_days),
                 'logo_url': self.get_logo_url(),
                 'current_date': datetime.now().strftime('%d/%m/%Y'),
                 'joining_date': (emp if salary_record else employee).joining_date.strftime('%d-%m-%Y') if (emp if salary_record else employee).joining_date else None,

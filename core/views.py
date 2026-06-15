@@ -2251,6 +2251,10 @@ class AttendanceViewSet(viewsets.ModelViewSet):
             new_day_status = request.data.get('day_status')
             notes = request.data.get('notes', '')
             reason = request.data.get('reason') or request.data.get('remarks') or notes
+            has_check_in_time = 'check_in_time' in request.data
+            has_check_out_time = 'check_out_time' in request.data
+            check_in_value = request.data.get('check_in_time')
+            check_out_value = request.data.get('check_out_time')
             
             if not all([user_id, date_str, new_status]):
                 return Response(
@@ -2286,6 +2290,38 @@ class AttendanceViewSet(viewsets.ModelViewSet):
                     {'error': 'Invalid date format. Use YYYY-MM-DD'}, 
                     status=status.HTTP_400_BAD_REQUEST
                 )
+
+            def parse_attendance_time(value, field_name):
+                if value in [None, '']:
+                    return None
+
+                value = str(value).strip()
+                parsed_datetime = None
+
+                try:
+                    parsed_time = datetime.strptime(value, '%H:%M').time()
+                    parsed_datetime = datetime.combine(target_date, parsed_time)
+                except ValueError:
+                    try:
+                        parsed_time = datetime.strptime(value, '%H:%M:%S').time()
+                        parsed_datetime = datetime.combine(target_date, parsed_time)
+                    except ValueError:
+                        try:
+                            parsed_datetime = datetime.fromisoformat(value.replace('Z', '+00:00'))
+                        except ValueError:
+                            raise ValueError(f'Invalid {field_name} format. Use HH:MM.')
+
+                if timezone.is_naive(parsed_datetime):
+                    parsed_datetime = timezone.make_aware(parsed_datetime, timezone.get_current_timezone())
+
+                return parsed_datetime
+
+            try:
+                parsed_check_in = parse_attendance_time(check_in_value, 'check_in_time') if has_check_in_time else None
+                parsed_check_out = parse_attendance_time(check_out_value, 'check_out_time') if has_check_out_time else None
+            except ValueError as exc:
+                return Response({'error': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
             
             # Get or create attendance record
             attendance, created = Attendance.objects.get_or_create(
@@ -2308,6 +2344,14 @@ class AttendanceViewSet(viewsets.ModelViewSet):
                 'status': attendance.status,
                 'day_status': attendance.day_status,
             }
+
+            effective_check_in = parsed_check_in if has_check_in_time else attendance.check_in_time
+            effective_check_out = parsed_check_out if has_check_out_time else attendance.check_out_time
+            if effective_check_in and effective_check_out and effective_check_out < effective_check_in:
+                return Response(
+                    {'error': 'Check-out time cannot be earlier than check-in time'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
 
             if attendance.is_locked and not request.user.is_superuser:
                 AttendanceAuditLog.objects.create(
@@ -2338,6 +2382,17 @@ class AttendanceViewSet(viewsets.ModelViewSet):
                     {'error': 'Reason is required to modify locked attendance.'},
                     status=status.HTTP_400_BAD_REQUEST
                 )
+
+            if has_check_in_time or has_check_out_time:
+                if has_check_in_time:
+                    attendance.check_in_time = parsed_check_in
+                if has_check_out_time:
+                    attendance.check_out_time = parsed_check_out
+
+                attendance.source = 'admin_correction'
+                attendance.manual_override = True
+                attendance.notes = notes
+                attendance.save()
             
             if not created:
                 # Update existing record using manual method to bypass automatic calculations
@@ -2381,9 +2436,14 @@ class AttendanceViewSet(viewsets.ModelViewSet):
                 'date': attendance.date.isoformat(),
                 'status': attendance.status,
                 'day_status': attendance.day_status,
+                'check_in_time': attendance.check_in_time.isoformat() if attendance.check_in_time else None,
+                'check_out_time': attendance.check_out_time.isoformat() if attendance.check_out_time else None,
+                'total_hours': float(attendance.total_hours) if attendance.total_hours is not None else None,
+                'is_late': attendance.is_late,
+                'late_minutes': attendance.late_minutes,
                 'notes': attendance.notes,
                 'updated_at': attendance.updated_at.isoformat(),
-                'message': 'Attendance status updated successfully'
+                'message': 'Attendance updated successfully'
             }
             
             print(f"Returning response: {response_data}")

@@ -2,8 +2,8 @@ import os
 import re
 
 from django.contrib.auth import get_user_model
+from django.contrib.auth.password_validation import validate_password
 from django.db import transaction
-from django.db.models import Q
 from django.utils import timezone
 from rest_framework import serializers
 
@@ -296,10 +296,25 @@ class RemarksUpdateSerializer(serializers.Serializer):
 
 
 class ConvertCandidateSerializer(serializers.Serializer):
+    first_name = serializers.CharField(required=False, allow_blank=True)
+    last_name = serializers.CharField(required=False, allow_blank=True)
+    email = serializers.EmailField(required=False, allow_blank=True)
     username = serializers.CharField(required=False, allow_blank=True)
+    password = serializers.CharField(required=False, allow_blank=True, write_only=True)
+    confirm_password = serializers.CharField(required=False, allow_blank=True, write_only=True)
     employee_id = serializers.CharField(required=False, allow_blank=True)
+    biometric_id = serializers.CharField(required=False, allow_blank=True)
+    aadhaar_card = serializers.CharField(required=False, allow_blank=True)
+    pan_card = serializers.CharField(required=False, allow_blank=True)
     joining_date = serializers.DateField(required=False)
     salary = serializers.DecimalField(max_digits=10, decimal_places=2, required=False, allow_null=True)
+    address = serializers.CharField(required=False, allow_blank=True)
+    pay_bank_name = serializers.CharField(required=False, allow_blank=True)
+    bank_name = serializers.CharField(required=False, allow_blank=True)
+    account_holder_name = serializers.CharField(required=False, allow_blank=True)
+    account_number = serializers.CharField(required=False, allow_blank=True)
+    ifsc_code = serializers.CharField(required=False, allow_blank=True)
+    bank_branch_name = serializers.CharField(required=False, allow_blank=True)
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -323,32 +338,48 @@ class ConvertCandidateSerializer(serializers.Serializer):
 
     def validate(self, attrs):
         candidate = self.context["candidate"]
-        if candidate.status != InterviewCandidate.STATUS_SELECTED:
-            raise serializers.ValidationError("Only selected candidates can be converted to employees.")
         if candidate.converted_employee_id:
             raise serializers.ValidationError("Candidate is already converted to an employee.")
+        if candidate.status != InterviewCandidate.STATUS_SELECTED:
+            raise serializers.ValidationError("Only selected candidates can be converted to employees.")
 
         missing_fields = []
-        if not candidate.full_name:
-            missing_fields.append("full_name")
         if not candidate.phone:
             missing_fields.append("phone")
+        full_name = candidate.full_name.strip() if candidate.full_name else ""
+        first_name = attrs.get("first_name") or full_name.partition(" ")[0]
+        if not first_name:
+            missing_fields.append("first_name")
         if missing_fields:
             raise serializers.ValidationError({"missing_fields": missing_fields})
 
         User = get_user_model()
-        duplicate_query = Q(phone=candidate.phone)
-        if candidate.email:
-            duplicate_query |= Q(email__iexact=candidate.email)
-        if candidate.aadhaar_number:
-            duplicate_query |= Q(aadhaar_card=candidate.aadhaar_number)
-        if candidate.pan_number:
-            duplicate_query |= Q(pan_card__iexact=candidate.pan_number)
+        if User.objects.filter(phone=candidate.phone).exists():
+            raise serializers.ValidationError({"phone": "An employee with this candidate phone number already exists."})
 
-        if User.objects.filter(duplicate_query).exists():
-            raise serializers.ValidationError(
-                "An employee with the same phone, email, Aadhaar, or PAN already exists."
-            )
+        username = attrs.get("username")
+        if username and User.objects.filter(username__iexact=username).exists():
+            raise serializers.ValidationError({"username": "This username is already used by another employee."})
+
+        employee_id = attrs.get("employee_id")
+        if employee_id and User.objects.filter(employee_id__iexact=employee_id).exists():
+            raise serializers.ValidationError({"employee_id": "This employee ID is already used."})
+
+        biometric_id = attrs.get("biometric_id")
+        if biometric_id and User.objects.filter(biometric_id__iexact=biometric_id).exists():
+            raise serializers.ValidationError({"biometric_id": "This biometric ID is already used."})
+
+        department = attrs.get("department")
+        designation = attrs.get("designation")
+        if department and designation and designation.department_id != department.id:
+            raise serializers.ValidationError({"designation": "Designation must belong to the selected department."})
+
+        password = attrs.get("password") or ""
+        confirm_password = attrs.get("confirm_password") or ""
+        if password or confirm_password:
+            if password != confirm_password:
+                raise serializers.ValidationError({"confirm_password": "Password and confirm password do not match."})
+            validate_password(password)
         return attrs
 
     def save(self, **kwargs):
@@ -356,8 +387,10 @@ class ConvertCandidateSerializer(serializers.Serializer):
         converted_by = self.context["request"].user
         User = get_user_model()
 
-        full_name = candidate.full_name.strip()
-        first_name, _, last_name = full_name.partition(" ")
+        full_name = candidate.full_name.strip() if candidate.full_name else ""
+        candidate_first_name, _, candidate_last_name = full_name.partition(" ")
+        first_name = self.validated_data.get("first_name") or candidate_first_name
+        last_name = self.validated_data.get("last_name") or candidate_last_name
         base_username = self.validated_data.get("username") or candidate.phone or candidate.token_number
         username = base_username
         if User.objects.filter(username=username).exists():
@@ -366,22 +399,36 @@ class ConvertCandidateSerializer(serializers.Serializer):
         with transaction.atomic():
             employee = User.objects.create_user(
                 username=username,
-                email=candidate.email or "",
+                email=self.validated_data.get("email", candidate.email or ""),
                 first_name=first_name,
                 last_name=last_name,
                 role="employee",
                 phone=candidate.phone,
-                aadhaar_card=candidate.aadhaar_number,
-                pan_card=candidate.pan_number,
+                address=self.validated_data.get("address") or candidate.current_city,
+                aadhaar_card=self.validated_data.get("aadhaar_card", candidate.aadhaar_number),
+                pan_card=self.validated_data.get("pan_card", candidate.pan_number),
                 employee_id=self.validated_data.get("employee_id") or None,
+                biometric_id=self.validated_data.get("biometric_id") or None,
                 joining_date=self.validated_data.get("joining_date"),
                 office=self.validated_data.get("office"),
                 department=self.validated_data.get("department"),
                 designation=self.validated_data.get("designation"),
                 salary=self.validated_data.get("salary"),
+                pay_bank_name=self.validated_data.get("pay_bank_name", ""),
+                bank_name=self.validated_data.get("bank_name", ""),
+                account_holder_name=self.validated_data.get("account_holder_name", ""),
+                account_number=self.validated_data.get("account_number", ""),
+                ifsc_code=self.validated_data.get("ifsc_code", ""),
+                bank_branch_name=self.validated_data.get("bank_branch_name", ""),
             )
-            employee.set_unusable_password()
-            employee.save(update_fields=["password"])
+            if candidate.photo:
+                employee.profile_picture = candidate.photo
+            password = self.validated_data.get("password")
+            if password:
+                employee.set_password(password)
+            else:
+                employee.set_unusable_password()
+            employee.save(update_fields=["password", "profile_picture"] if candidate.photo else ["password"])
 
             old_status = candidate.status
             candidate.converted_employee = employee

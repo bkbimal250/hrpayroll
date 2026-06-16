@@ -1404,9 +1404,9 @@ class Resignation(models.Model):
         if self.approved_by and self.approved_by.role not in ['admin', 'manager', 'hr']:
             raise ValidationError('Only admin, manager, or HR can approve resignations.')
         
-        # Ensure user is an employee
-        if self.user.role != 'employee':
-            raise ValidationError('Only employees can submit resignation requests.')
+        # Ensure user can submit resignation requests
+        if self.user.role not in ['employee', 'accountant']:
+            raise ValidationError('Only employees and accountants can submit resignation requests.')
 
     def save(self, *args, **kwargs):
         self.clean()

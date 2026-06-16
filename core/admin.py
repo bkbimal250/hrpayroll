@@ -1000,12 +1000,25 @@ class ResignationAdmin(UnfoldModelAdmin):
     fieldsets = (
         (None, {'fields': ('user', 'resignation_date', 'notice_period_days')}),
         ('Resignation Details', {'fields': ('reason', 'handover_notes', 'is_handover_completed')}),
-        ('Approval Information', {'fields': ('status', 'approved_by', 'approved_at', 'status_reason')}),
+        ('Approval Information', {'fields': ('status', 'approved_by', 'approved_at', 'rejection_reason')}),
         ('Calculated Fields', {'fields': ('last_working_date',)}),
         ('Timestamps', {'fields': ('created_at', 'updated_at')}),
     )
     
     actions = ['approve_resignations', 'reject_resignations']
+
+    def save_model(self, request, obj, form, change):
+        super().save_model(request, obj, form, change)
+        if obj.status in ['pending', 'approved']:
+            obj.user.set_employment_status(
+                'notice_period',
+                changed_by=request.user,
+                remarks='Resignation updated from admin panel',
+                is_active=True,
+                resignation_date=obj.resignation_date,
+                last_working_date=obj.last_working_date,
+                exit_type='resigned',
+            )
     
     def approve_resignations(self, request, queryset):
         from django.utils import timezone

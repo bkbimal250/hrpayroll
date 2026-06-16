@@ -37,7 +37,7 @@ from .serializers import (
     DashboardStatsSerializer, AttendanceLogSerializer, OfficeStatsSerializer,
     UserLoginSerializer, DeviceSyncSerializer, DocumentTemplateSerializer, 
     GeneratedDocumentSerializer, DocumentGenerationSerializer, ResignationSerializer,
-    ResignationCreateSerializer, ResignationApprovalSerializer, DepartmentSerializer, DesignationSerializer,
+    ResignationCreateSerializer, ResignationAdminUpdateSerializer, ResignationApprovalSerializer, DepartmentSerializer, DesignationSerializer,
     ShiftSerializer, EmployeeShiftAssignmentSerializer, EmployeeStatusAuditLogSerializer,
     BiometricAssignmentHistorySerializer, PasswordChangeHistorySerializer, AttendanceAuditLogSerializer,
     DuplicatePunchAttemptSerializer, UnmatchedBiometricPunchSerializer
@@ -4448,6 +4448,8 @@ class ResignationViewSet(viewsets.ModelViewSet):
         """Return appropriate serializer based on action"""
         if self.action == 'create':
             return ResignationCreateSerializer
+        elif self.action in ['update', 'partial_update']:
+            return ResignationAdminUpdateSerializer
         elif self.action in ['approve', 'reject']:
             return ResignationApprovalSerializer
         return ResignationSerializer
@@ -4457,7 +4459,7 @@ class ResignationViewSet(viewsets.ModelViewSet):
         if self.action in ['create']:
             # Only employees can create resignation requests
             permission_classes = [IsAuthenticated]
-        elif self.action in ['approve', 'reject']:
+        elif self.action in ['approve', 'reject', 'update', 'partial_update']:
             # Only admin and manager can approve/reject
             permission_classes = [IsAdminOrManagerOrHR]
         elif self.action in ['destroy']:
@@ -4467,6 +4469,30 @@ class ResignationViewSet(viewsets.ModelViewSet):
             permission_classes = [IsAuthenticated]
         
         return [permission() for permission in permission_classes]
+
+    def perform_update(self, serializer):
+        """Allow privileged users to edit resignation records and keep employee dates in sync."""
+        resignation = serializer.save()
+        if resignation.status in ['pending', 'approved']:
+            resignation.user.set_employment_status(
+                'notice_period',
+                changed_by=self.request.user,
+                remarks='Resignation updated',
+                is_active=True,
+                resignation_date=resignation.resignation_date,
+                last_working_date=resignation.last_working_date,
+                exit_type='resigned',
+            )
+
+    def update(self, request, *args, **kwargs):
+        """Update privileged editable fields and return the full resignation record."""
+        partial = kwargs.pop('partial', False)
+        instance = self.get_object()
+        serializer = self.get_serializer(instance, data=request.data, partial=partial)
+        serializer.is_valid(raise_exception=True)
+        self.perform_update(serializer)
+        instance.refresh_from_db()
+        return Response(ResignationSerializer(instance).data)
 
     def create(self, request, *args, **kwargs):
         """Create a new resignation request"""

@@ -1297,6 +1297,13 @@ class ResignationCreateSerializer(serializers.ModelSerializer):
         return super().create(validated_data)
 
 
+class ResignationAdminUpdateSerializer(serializers.ModelSerializer):
+    """Serializer for privileged resignation date corrections."""
+    class Meta:
+        model = Resignation
+        fields = ['resignation_date']
+
+
 class ResignationApprovalSerializer(serializers.ModelSerializer):
     """Serializer for resignation approval/rejection"""
     class Meta:

@@ -17,19 +17,33 @@ class CustomUserFilter(django_filters.FilterSet):
     aadhaar_card = django_filters.CharFilter(field_name='aadhaar_card', lookup_expr='icontains')
     pan_card = django_filters.CharFilter(field_name='pan_card', lookup_expr='icontains')
     marital_status = django_filters.CharFilter(method='filter_marital_status')
+    gender = django_filters.CharFilter(method='filter_gender')
     
     class Meta:
         model = CustomUser
         fields = [
             'office', 'department', 'role', 'is_active', 'employment_status',
-            'status', 'search', 'aadhaar_card', 'pan_card', 'marital_status'
+            'status', 'search', 'aadhaar_card', 'pan_card', 'marital_status', 'gender'
         ]
 
     def filter_marital_status(self, queryset, name, value):
-        """Filter by marital_status value"""
+        """Filter by marital_status value (case-insensitive)"""
         if not value:
             return queryset
         return queryset.filter(marital_status__iexact=value)
+
+    def filter_gender(self, queryset, name, value):
+        """Filter by gender. Accepts full name (male/female/other) or single char (M/F/O)"""
+        if not value:
+            return queryset
+        gender_map = {
+            'male': 'M',
+            'female': 'F',
+            'other': 'O',
+        }
+        # Normalize: accept 'male' -> 'M', or already 'M'
+        normalized = gender_map.get(value.lower(), value.upper())
+        return queryset.filter(gender__iexact=normalized)
 
     def filter_status(self, queryset, name, value):
         """Support legacy active/inactive filters and new lifecycle status values."""

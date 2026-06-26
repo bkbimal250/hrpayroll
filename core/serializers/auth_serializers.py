@@ -245,6 +245,18 @@ class CustomUserSerializer(serializers.ModelSerializer):
                 attrs['pan_card'] = pan
         elif pan_card == '':
             attrs['pan_card'] = ''
+
+        account_number = attrs.get('account_number')
+        if account_number and '*' in str(account_number):
+            attrs.pop('account_number', None)
+        elif account_number:
+            attrs['account_number'] = re.sub(r'\s+', '', str(account_number))
+
+        ifsc_code = attrs.get('ifsc_code')
+        if ifsc_code and '*' in str(ifsc_code):
+            attrs.pop('ifsc_code', None)
+        elif ifsc_code:
+            attrs['ifsc_code'] = re.sub(r'[^A-Za-z0-9]', '', str(ifsc_code)).upper()
         
         return attrs
 
@@ -409,7 +421,7 @@ class ManagerEmployeeListSerializer(serializers.ModelSerializer):
 
 
 class HREmployeeDetailSerializer(CustomUserSerializer):
-    """HR detail serializer. Salary and bank account are masked."""
+    """HR detail serializer with masked government and bank identifiers."""
     aadhaar_card = serializers.SerializerMethodField()
     pan_card = serializers.SerializerMethodField()
     account_number = serializers.SerializerMethodField()
@@ -429,7 +441,7 @@ class HREmployeeDetailSerializer(CustomUserSerializer):
         return _mask_tail(obj.ifsc_code)
 
     def get_salary(self, obj):
-        return None
+        return str(obj.salary) if obj.salary is not None else None
 
 
 class AdminEmployeeDetailSerializer(CustomUserSerializer):

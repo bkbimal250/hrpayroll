@@ -1101,6 +1101,17 @@ class DocumentGenerationViewSet(viewsets.ViewSet):
     """ViewSet for generating documents"""
     permission_classes = [IsAuthenticated]
 
+    def get_employee_title(self, employee):
+        """Return document salutation from gender and marital_status."""
+        gender = (getattr(employee, 'gender', '') or '').strip().upper()
+        marital_status = (getattr(employee, 'marital_status', '') or '').strip().lower()
+
+        if gender == 'M':
+            return "Mr."
+        if gender == 'F':
+            return "Mrs." if marital_status in ['married', 'divorced', 'widowed', 'separated'] else "Miss."
+        return ""
+
     def get_offer_letter_template(self):
         """Professional offer letter template from external file"""
         import os
@@ -1403,30 +1414,7 @@ class DocumentGenerationViewSet(viewsets.ViewSet):
             else:
                 start_date_formatted = ''
             
-                        # Determine title based on marital status and gender
-            gender_title = ""
-            if employee.marital_status == 'Single' and employee.gender == 'M':
-                gender_title = "Mr."
-            elif employee.marital_status == 'Single' and employee.gender == 'F':
-                gender_title = "Miss."
-            elif employee.marital_status == 'Married' and employee.gender == 'M':
-                gender_title = "Mr."
-            elif employee.marital_status == 'Married' and employee.gender == 'F':
-                gender_title = "Mrs."
-            elif employee.marital_status == 'Divorced' and employee.gender == 'M':
-                gender_title = "Mr."
-            elif employee.marital_status == 'Divorced' and employee.gender == 'F':
-                gender_title = "Mrs."
-            elif employee.marital_status == 'Widowed' and employee.gender == 'M':
-                gender_title = "Mr."
-            elif employee.marital_status == 'Widowed' and employee.gender == 'F':
-                gender_title = "Mrs."
-            elif employee.marital_status == 'Separated' and employee.gender == 'M':
-                gender_title = "Mr."
-            elif employee.marital_status == 'Separated' and employee.gender == 'F':
-                gender_title = "Mrs."
-            else:
-                gender_title = "Mr."
+            gender_title = self.get_employee_title(employee)
             
             context = {
                 'title': gender_title,
@@ -1719,12 +1707,7 @@ class DocumentGenerationViewSet(viewsets.ViewSet):
                 else:
                     lwd_formatted = 'Not specified'
 
-            # Determine title based on gender
-            gender_title = ""
-            if employee.gender == 'M':
-                gender_title = "Mr."
-            elif employee.gender == 'F':
-                gender_title = "Mrs."
+            gender_title = self.get_employee_title(employee)
             
             # Resignation logic moved above context
 
@@ -1784,12 +1767,7 @@ class DocumentGenerationViewSet(viewsets.ViewSet):
                 else:
                     rd_formatted = 'Not specified'
 
-            # Determine title based on gender
-            gender_title = ""
-            if employee.gender == 'M':
-                gender_title = "Mr."
-            elif employee.gender == 'F':
-                gender_title = "Mrs."
+            gender_title = self.get_employee_title(employee)
                 
             # Resignation logic moved above context
 

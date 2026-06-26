@@ -24,7 +24,7 @@ class ResignationSubmissionTests(TestCase):
 
         resignation_date = timezone.now().date()
         response = self.client.post(
-            reverse('resignation-list'),
+            reverse('core:resignation-list'),
             {
                 'resignation_date': resignation_date.isoformat(),
                 'notice_period_days': 30,
@@ -68,7 +68,7 @@ class ResignationSubmissionTests(TestCase):
 
         past_date = timezone.now().date() - timedelta(days=10)
         response = self.client.patch(
-            reverse('resignation-detail', args=[resignation.id]),
+            reverse('core:resignation-detail', args=[resignation.id]),
             {'resignation_date': past_date.isoformat()},
             format='json',
         )

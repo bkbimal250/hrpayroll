@@ -29,6 +29,7 @@ class NullableDateTimeField(DateTimeField):
 from django.contrib.auth import authenticate
 from django.contrib.auth.password_validation import validate_password
 import uuid
+import re
 from ..models import (
     CustomUser, Office, Device, DeviceUser, Attendance, Leave, Document, 
     Notification, SystemSettings, AttendanceLog, ESSLAttendanceLog, 
@@ -117,6 +118,8 @@ class DesignationSerializer(serializers.ModelSerializer):
 
 class CustomUserSerializer(serializers.ModelSerializer):
     """Serializer for CustomUser model"""
+    aadhaar_card = serializers.CharField(required=False, allow_blank=True, max_length=32, trim_whitespace=True)
+    pan_card = serializers.CharField(required=False, allow_blank=True, max_length=20, trim_whitespace=True)
     office_name = serializers.CharField(source='office.name', read_only=True)
     department_name = serializers.SerializerMethodField()
     designation_name = serializers.SerializerMethodField()
@@ -218,18 +221,30 @@ class CustomUserSerializer(serializers.ModelSerializer):
         # Validate Aadhaar card number
         aadhaar_card = attrs.get('aadhaar_card')
         if aadhaar_card:
-            aadhaar = aadhaar_card.replace(' ', '').replace('-', '')
-            if not aadhaar.isdigit() or len(aadhaar) != 12:
-                raise serializers.ValidationError({'aadhaar_card': 'Aadhaar card number must be exactly 12 digits.'})
-        
+            if '*' in str(aadhaar_card):
+                attrs.pop('aadhaar_card', None)
+            else:
+                aadhaar = re.sub(r'\D', '', str(aadhaar_card))
+                if len(aadhaar) != 12:
+                    raise serializers.ValidationError({'aadhaar_card': 'Aadhaar card number must be exactly 12 digits.'})
+                attrs['aadhaar_card'] = aadhaar
+        elif aadhaar_card == '':
+            attrs['aadhaar_card'] = ''
+
         # Validate PAN card number
         pan_card = attrs.get('pan_card')
         if pan_card:
-            pan = pan_card.upper().replace(' ', '')
-            if len(pan) != 10:
-                raise serializers.ValidationError({'pan_card': 'PAN card number must be exactly 10 characters.'})
-            if not (pan[:5].isalpha() and pan[5:9].isdigit() and pan[9].isalpha()):
-                raise serializers.ValidationError({'pan_card': 'PAN card number format should be: AAAAA9999A (5 letters, 4 digits, 1 letter).'})
+            if '*' in str(pan_card):
+                attrs.pop('pan_card', None)
+            else:
+                pan = re.sub(r'[^A-Za-z0-9]', '', str(pan_card)).upper()
+                if len(pan) != 10:
+                    raise serializers.ValidationError({'pan_card': 'PAN card number must be exactly 10 characters.'})
+                if not (pan[:5].isalpha() and pan[5:9].isdigit() and pan[9].isalpha()):
+                    raise serializers.ValidationError({'pan_card': 'PAN card number format should be: AAAAA9999A (5 letters, 4 digits, 1 letter).'})
+                attrs['pan_card'] = pan
+        elif pan_card == '':
+            attrs['pan_card'] = ''
         
         return attrs
 

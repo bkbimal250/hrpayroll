@@ -959,7 +959,7 @@ class CustomUserViewSet(viewsets.ModelViewSet):
             
             # Send notifications if bank account fields changed
             if changed_fields:
-                from .notification_service import notify_bank_account_updated
+                from ..notification_service import notify_bank_account_updated
                 notify_bank_account_updated(instance, request.user, changed_fields)
         
         return response
@@ -1002,7 +1002,7 @@ class CustomUserViewSet(viewsets.ModelViewSet):
             
             # Send notifications if bank account fields changed
             if changed_fields:
-                from .notification_service import notify_bank_account_updated
+                from ..notification_service import notify_bank_account_updated
                 notify_bank_account_updated(instance, request.user, changed_fields)
         
         return response

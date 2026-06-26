@@ -167,7 +167,7 @@ class NotificationViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'])
     def mark_read(self, request, pk=None):
         """Mark notification as read"""
-        from .notification_service import NotificationService
+        from ..notification_service import NotificationService
         
         success = NotificationService.mark_as_read(pk, request.user)
         if success:
@@ -177,7 +177,7 @@ class NotificationViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['post'])
     def mark_all_read(self, request):
         """Mark all notifications as read"""
-        from .notification_service import NotificationService
+        from ..notification_service import NotificationService
         
         updated_count = NotificationService.mark_all_as_read(request.user)
         return Response({
@@ -197,7 +197,7 @@ class NotificationViewSet(viewsets.ModelViewSet):
         """Delete a notification"""
         if request.user.is_hr:
             return Response({'error': 'HR users cannot delete notifications'}, status=status.HTTP_403_FORBIDDEN)
-        from .notification_service import NotificationService
+        from ..notification_service import NotificationService
         
         success = NotificationService.delete_notification(pk, request.user)
         if success:
@@ -209,7 +209,7 @@ class NotificationViewSet(viewsets.ModelViewSet):
         """Delete expired notifications"""
         if request.user.is_hr:
             return Response({'error': 'HR users cannot delete notifications'}, status=status.HTTP_403_FORBIDDEN)
-        from .notification_service import NotificationService
+        from ..notification_service import NotificationService
         
         deleted_count = NotificationService.delete_expired_notifications()
         return Response({
@@ -221,7 +221,7 @@ class NotificationViewSet(viewsets.ModelViewSet):
         """Clean up old notifications (admin only)"""
         if request.user.is_hr:
             return Response({'error': 'HR users cannot delete notifications'}, status=status.HTTP_403_FORBIDDEN)
-        from .notification_service import NotificationService
+        from ..notification_service import NotificationService
         
         days = request.data.get('days', 30)
         deleted_count = NotificationService.cleanup_old_notifications(days)
@@ -253,7 +253,7 @@ class NotificationViewSet(viewsets.ModelViewSet):
     def create_bulk(self, request):
         """Create notifications for multiple users (admin/manager only)"""
         import logging
-        from .notification_service import NotificationService
+        from ..notification_service import NotificationService
         
         logger = logging.getLogger(__name__)
         

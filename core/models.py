@@ -128,6 +128,8 @@ class CustomUser(AbstractUser):
         ('F', 'Female'),
         ('O', 'Other'),
     ]
+
+    # MARITAL_STATUS_CHOICES moved to frontend
     
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     role = models.CharField(max_length=10, choices=ROLE_CHOICES, default='employee')
@@ -139,6 +141,7 @@ class CustomUser(AbstractUser):
     date_of_birth = models.DateField(null=True, blank=True)
     gender = models.CharField(max_length=1, choices=GENDER_CHOICES, blank=True)
     profile_picture = models.ImageField(upload_to='profile_pictures/', null=True, blank=True)
+    marital_status = models.CharField(max_length=20, blank=True)
     
     # Government ID Information
     aadhaar_card = models.CharField(max_length=12, blank=True, help_text="12-digit Aadhaar card number")
@@ -218,6 +221,12 @@ class CustomUser(AbstractUser):
         verbose_name = "User"
         verbose_name_plural = "Users"
         ordering = ['username']
+        indexes = [
+            models.Index(fields=['role']),
+            models.Index(fields=['employment_status']),
+            models.Index(fields=['office', 'role']),
+            models.Index(fields=['department']),
+        ]
 
     def __str__(self):
         return f"{self.get_full_name()} ({self.role})"
@@ -584,6 +593,12 @@ class Device(models.Model):
 
     class Meta:
         ordering = ['name']
+        indexes = [
+            models.Index(fields=['office', 'is_active']),
+            models.Index(fields=['device_type', 'is_active']),
+            models.Index(fields=['ip_address']),
+            models.Index(fields=['device_id']),
+        ]
 
     def __str__(self):
         return f"{self.name} ({self.device_type})"
@@ -705,6 +720,12 @@ class Attendance(models.Model):
     class Meta:
         unique_together = ['user', 'date']
         ordering = ['-date', '-check_in_time']
+        indexes = [
+            models.Index(fields=['user', 'date']),
+            models.Index(fields=['date', 'status']),
+            models.Index(fields=['created_at']),
+            models.Index(fields=['device', 'source']),
+        ]
 
     def __str__(self):
         try:
@@ -956,6 +977,11 @@ class Leave(models.Model):
 
     class Meta:
         ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['user', 'status']),
+            models.Index(fields=['start_date']),
+            models.Index(fields=['end_date']),
+        ]
 
     def __str__(self):
         try:
@@ -1062,6 +1088,7 @@ class Notification(models.Model):
         ordering = ['-created_at']
         indexes = [
             models.Index(fields=['user', 'is_read']),
+            models.Index(fields=['user', 'is_read', 'created_at']),
             models.Index(fields=['notification_type', 'created_at']),
             models.Index(fields=['priority', 'created_at']),
         ]
@@ -1868,3 +1895,70 @@ class EmployeeShiftAssignment(models.Model):
     def save(self, *args, **kwargs):
         self.clean()
         super().save(*args, **kwargs)
+
+
+class AsyncJob(models.Model):
+    """Lightweight tracker for long-running backend work dispatched to Celery."""
+    STATUS_CHOICES = [
+        ('queued', 'Queued'),
+        ('running', 'Running'),
+        ('completed', 'Completed'),
+        ('failed', 'Failed'),
+    ]
+
+    JOB_TYPE_CHOICES = [
+        ('zkteco_sync_device', 'ZKTeco Device Sync'),
+        ('zkteco_sync_all_devices', 'ZKTeco All Devices Sync'),
+        ('zkteco_device_status', 'ZKTeco Device Status Check'),
+        ('salary_bulk_create', 'Salary Bulk Create'),
+        ('report_export', 'Report Export'),
+        ('document_generation', 'Document Generation'),
+        ('email_delivery', 'Email Delivery'),
+        ('notification_broadcast', 'Notification Broadcast'),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    job_type = models.CharField(max_length=50, choices=JOB_TYPE_CHOICES, db_index=True)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='queued', db_index=True)
+    requested_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='async_jobs',
+    )
+    task_id = models.CharField(max_length=255, blank=True, db_index=True)
+    payload = models.JSONField(default=dict, blank=True)
+    result = models.JSONField(default=dict, blank=True)
+    error = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    started_at = models.DateTimeField(null=True, blank=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['job_type', 'status']),
+            models.Index(fields=['requested_by', 'created_at']),
+            models.Index(fields=['status', 'created_at']),
+        ]
+
+    def mark_running(self, task_id=''):
+        self.status = 'running'
+        if task_id:
+            self.task_id = task_id
+        self.started_at = timezone.now()
+        self.save(update_fields=['status', 'task_id', 'started_at', 'updated_at'])
+
+    def mark_completed(self, result=None):
+        self.status = 'completed'
+        self.result = result or {}
+        self.completed_at = timezone.now()
+        self.save(update_fields=['status', 'result', 'completed_at', 'updated_at'])
+
+    def mark_failed(self, error):
+        self.status = 'failed'
+        self.error = str(error)
+        self.completed_at = timezone.now()
+        self.save(update_fields=['status', 'error', 'completed_at', 'updated_at'])

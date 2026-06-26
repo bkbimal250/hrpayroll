@@ -17,15 +17,16 @@ from decimal import Decimal
 import uuid
 
 from .models import (
-    Salary, SalaryTemplate, CustomUser, Office, Department, Designation, Attendance
+    Salary, SalaryTemplate, CustomUser, Office, Department, Designation, Attendance, AsyncJob
 )
 from .serializers import (
-    SalarySerializer, SalaryListSerializer, SalaryCreateSerializer, SalaryUpdateSerializer,
+    SalarySerializer, SalaryListSerializer, PayrollAdminSerializer, SalaryCreateSerializer, SalaryUpdateSerializer,
     SalaryApprovalSerializer, SalaryPaymentSerializer, SalaryTemplateSerializer,
     SalaryTemplateCreateSerializer, SalaryBulkCreateSerializer, SalaryReportSerializer,
     SalarySummarySerializer, SalaryAutoCalculateSerializer
 )
 from .permissions import IsAdminOrManager, IsAdminOrManagerOrAccountant, IsAdminOrManagerOrEmployee, IsEmployeeSalaryAccess
+from .tasks import salary_bulk_create_task
 
 
 class SalaryListView(generics.ListCreateAPIView):
@@ -52,6 +53,8 @@ class SalaryListView(generics.ListCreateAPIView):
     def get_serializer_class(self):
         if self.request.method == 'POST':
             return SalaryCreateSerializer
+        if self.request.user.role in ['admin', 'accountant']:
+            return PayrollAdminSerializer
         return SalaryListSerializer
 
     def get_queryset(self):
@@ -201,6 +204,8 @@ class SalaryDetailView(generics.RetrieveUpdateDestroyAPIView):
         """Return appropriate serializer based on action"""
         if self.request.method in ['PUT', 'PATCH']:
             return SalaryUpdateSerializer
+        if self.request.user.role in ['admin', 'accountant']:
+            return PayrollAdminSerializer
         return SalarySerializer
 
     def update(self, request, *args, **kwargs):
@@ -325,72 +330,29 @@ class SalaryBulkCreateView(APIView):
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
         data = serializer.validated_data
-        employee_ids = data['employee_ids']
-        salary_month = data['salary_month']
-        template_id = data.get('template_id')
-        basic_pay = data.get('basic_pay')
-        increment = data.get('increment', 0)
-        attendance_based = data.get('attendance_based', True)
-
-        created_salaries = []
-        errors = []
-
-        for employee_id in employee_ids:
-            try:
-                employee = CustomUser.objects.get(id=employee_id)
-                
-                # Check for existing salary for this employee and month
-                if Salary.objects.filter(employee=employee, salary_month=salary_month).exists():
-                    errors.append(f"Salary already exists for {employee.get_full_name()} for {salary_month.strftime('%B %Y')}")
-                    continue
-
-                # Get salary data from template or use provided basic_pay
-                if template_id:
-                    template = SalaryTemplate.objects.get(id=template_id)
-                    if employee.designation.name != template.designation_name or employee.office.name != template.office_name:
-                        errors.append(f"Template doesn't match employee {employee.get_full_name()}")
-                        continue
-                    
-                    salary_data = {
-                        'employee': employee,
-                        'basic_pay': template.basic_pay,
-                        'salary_month': salary_month,
-                        'attendance_based': attendance_based,
-                        'is_auto_calculated': True,
-                        'created_by': request.user
-                    }
-                else:
-                    salary_data = {
-                        'employee': employee,
-                        'basic_pay': basic_pay,
-                        'increment': increment,
-                        'salary_month': salary_month,
-                        'attendance_based': attendance_based,
-                        'is_auto_calculated': True,
-                        'created_by': request.user
-                    }
-                
-                # Use employee's pay_bank_name if available
-                if employee.pay_bank_name:
-                    salary_data['Bank_name'] = employee.pay_bank_name
-
-                salary = Salary.objects.create(**salary_data)
-                created_salaries.append(SalarySerializer(salary).data)
-
-            except CustomUser.DoesNotExist:
-                errors.append(f"Employee with ID {employee_id} not found")
-            except SalaryTemplate.DoesNotExist:
-                errors.append(f"Template with ID {template_id} not found")
-            except Exception as e:
-                errors.append(f"Error creating salary for employee {employee_id}: {str(e)}")
-
-        response_data = {
-            'created_salaries': created_salaries,
-            'total_created': len(created_salaries),
-            'errors': errors
+        payload = {
+            'employee_ids': [str(employee_id) for employee_id in data['employee_ids']],
+            'salary_month': data['salary_month'].isoformat(),
+            'template_id': str(data['template_id']) if data.get('template_id') else None,
+            'basic_pay': str(data['basic_pay']) if data.get('basic_pay') is not None else None,
+            'increment': str(data.get('increment', 0)),
+            'attendance_based': data.get('attendance_based', True),
         }
+        job = AsyncJob.objects.create(
+            job_type='salary_bulk_create',
+            requested_by=request.user,
+            payload=payload,
+        )
+        async_result = salary_bulk_create_task.delay(str(job.id))
+        job.task_id = async_result.id
+        job.save(update_fields=['task_id', 'updated_at'])
 
-        return Response(response_data, status=status.HTTP_201_CREATED)
+        return Response({
+            'message': 'Salary bulk creation queued for background processing',
+            'job_id': str(job.id),
+            'task_id': async_result.id,
+            'status': job.status,
+        }, status=status.HTTP_202_ACCEPTED)
 
 
 class SalaryAutoCalculateView(APIView):

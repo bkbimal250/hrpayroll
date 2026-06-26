@@ -69,11 +69,8 @@ class NotificationService:
                     f"Skipping notification email outside production: {title} for user {user.get_full_name()}"
                 )
             elif send_email and user.email and user.is_active:
-                from .email_service import EmailNotificationService
-                if priority == 'urgent':
-                    EmailNotificationService.send_urgent_notification_email(notification)
-                else:
-                    EmailNotificationService.send_notification_email(notification)
+                from .tasks import send_notification_email
+                send_notification_email.delay(str(notification.id), urgent=(priority == 'urgent'))
             elif send_email and not user.is_active:
                 logger.info(f"Skipping email for inactive user: {user.get_full_name()} ({user.email})")
             

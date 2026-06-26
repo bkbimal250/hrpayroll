@@ -40,3 +40,43 @@ class ResignationSubmissionTests(TestCase):
         self.assertEqual(resignation.last_working_date, resignation_date + timedelta(days=30))
         accountant.refresh_from_db()
         self.assertEqual(accountant.employment_status, 'notice_period')
+
+    def test_admin_can_update_resignation_to_past_date(self):
+        employee = CustomUser.objects.create_user(
+            username='employee@example.com',
+            email='employee@example.com',
+            password='test-pass-123',
+            role='employee',
+            employee_id='EMP001',
+        )
+        admin = CustomUser.objects.create_user(
+            username='admin@example.com',
+            email='admin@example.com',
+            password='test-pass-123',
+            role='admin',
+            employee_id='ADM001',
+            is_staff=True,
+            is_superuser=True,
+        )
+        resignation = Resignation.objects.create(
+            user=employee,
+            resignation_date=timezone.now().date(),
+            notice_period_days=30,
+            reason='Personal reasons',
+        )
+        self.client.force_authenticate(user=admin)
+
+        past_date = timezone.now().date() - timedelta(days=10)
+        response = self.client.patch(
+            reverse('resignation-detail', args=[resignation.id]),
+            {'resignation_date': past_date.isoformat()},
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        resignation.refresh_from_db()
+        self.assertEqual(resignation.resignation_date, past_date)
+        self.assertEqual(resignation.last_working_date, past_date + timedelta(days=30))
+        employee.refresh_from_db()
+        self.assertEqual(employee.resignation_date, past_date)
+        self.assertEqual(employee.last_working_date, past_date + timedelta(days=30))

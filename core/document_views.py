@@ -1403,12 +1403,30 @@ class DocumentGenerationViewSet(viewsets.ViewSet):
             else:
                 start_date_formatted = ''
             
-            # Determine title based on gender
+                        # Determine title based on marital status and gender
             gender_title = ""
-            if employee.gender == 'M':
+            if employee.marital_status == 'Single' and employee.gender == 'M':
                 gender_title = "Mr."
-            elif employee.gender == 'F':
+            elif employee.marital_status == 'Single' and employee.gender == 'F':
+                gender_title = "Miss."
+            elif employee.marital_status == 'Married' and employee.gender == 'M':
+                gender_title = "Mr."
+            elif employee.marital_status == 'Married' and employee.gender == 'F':
                 gender_title = "Mrs."
+            elif employee.marital_status == 'Divorced' and employee.gender == 'M':
+                gender_title = "Mr."
+            elif employee.marital_status == 'Divorced' and employee.gender == 'F':
+                gender_title = "Mrs."
+            elif employee.marital_status == 'Widowed' and employee.gender == 'M':
+                gender_title = "Mr."
+            elif employee.marital_status == 'Widowed' and employee.gender == 'F':
+                gender_title = "Mrs."
+            elif employee.marital_status == 'Separated' and employee.gender == 'M':
+                gender_title = "Mr."
+            elif employee.marital_status == 'Separated' and employee.gender == 'F':
+                gender_title = "Mrs."
+            else:
+                gender_title = "Mr."
             
             context = {
                 'title': gender_title,

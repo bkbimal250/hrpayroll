@@ -21,6 +21,8 @@ from django.conf.urls.static import static
 from django.views.generic import TemplateView
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
+from django.core.cache import cache
+from django.db import connections
 
 def health_check(request):
     """Health check endpoint for production monitoring"""
@@ -30,10 +32,38 @@ def health_check(request):
         'environment': getattr(settings, 'ENVIRONMENT', 'development')
     })
 
+def readiness_check(request):
+    """Readiness check for local infrastructure dependencies only."""
+    checks = {'database': False, 'cache': False}
+    status_code = 200
+
+    try:
+        with connections['default'].cursor() as cursor:
+            cursor.execute('SELECT 1')
+            cursor.fetchone()
+        checks['database'] = True
+    except Exception:
+        status_code = 503
+
+    try:
+        cache.set('readiness_probe', 'ok', timeout=5)
+        checks['cache'] = cache.get('readiness_probe') == 'ok'
+    except Exception:
+        status_code = 503
+
+    if not all(checks.values()):
+        status_code = 503
+
+    return JsonResponse({
+        'status': 'ready' if status_code == 200 else 'not_ready',
+        'checks': checks,
+    }, status=status_code)
+
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('', include('core.urls')),
     path('health/', health_check, name='health_check'),
+    path('readiness/', readiness_check, name='readiness_check'),
 ]
 
 # Serve media files during development

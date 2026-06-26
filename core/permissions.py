@@ -5,6 +5,48 @@ Custom permissions for the Employee Attendance System
 from rest_framework import permissions
 
 
+PRIVILEGED_HR_ROLES = {'admin', 'hr'}
+PAYROLL_ROLES = {'admin', 'accountant'}
+MANAGEMENT_ROLES = {'admin', 'hr', 'manager'}
+
+
+def is_admin(user):
+    return bool(user and user.is_authenticated and getattr(user, 'role', None) == 'admin')
+
+
+def is_hr_or_admin(user):
+    return bool(user and user.is_authenticated and getattr(user, 'role', None) in PRIVILEGED_HR_ROLES)
+
+
+def is_payroll_user(user):
+    return bool(user and user.is_authenticated and getattr(user, 'role', None) in PAYROLL_ROLES)
+
+
+def user_can_access_employee(actor, employee):
+    if not actor or not actor.is_authenticated or not employee:
+        return False
+    if actor.role in ['admin', 'hr']:
+        return True
+    if actor.role == 'manager':
+        return bool(actor.office_id and employee.office_id == actor.office_id)
+    return actor.id == employee.id
+
+
+class IsAdminOnlyPermission(permissions.BasePermission):
+    def has_permission(self, request, view):
+        return is_admin(request.user)
+
+
+class IsHRAdminOrReadOnlyManager(permissions.BasePermission):
+    def has_permission(self, request, view):
+        user = request.user
+        if not user or not user.is_authenticated:
+            return False
+        if user.role in ['admin', 'hr']:
+            return True
+        return user.role == 'manager' and request.method in permissions.SAFE_METHODS
+
+
 class IsAdminOrManager(permissions.BasePermission):
     """
     Custom permission to only allow admins and managers to access.

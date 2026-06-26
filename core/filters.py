@@ -16,13 +16,20 @@ class CustomUserFilter(django_filters.FilterSet):
     search = django_filters.CharFilter(method='filter_search')
     aadhaar_card = django_filters.CharFilter(field_name='aadhaar_card', lookup_expr='icontains')
     pan_card = django_filters.CharFilter(field_name='pan_card', lookup_expr='icontains')
+    marital_status = django_filters.CharFilter(method='filter_marital_status')
     
     class Meta:
         model = CustomUser
         fields = [
             'office', 'department', 'role', 'is_active', 'employment_status',
-            'status', 'search', 'aadhaar_card', 'pan_card'
+            'status', 'search', 'aadhaar_card', 'pan_card', 'marital_status'
         ]
+
+    def filter_marital_status(self, queryset, name, value):
+        """Filter by marital_status value"""
+        if not value:
+            return queryset
+        return queryset.filter(marital_status__iexact=value)
 
     def filter_status(self, queryset, name, value):
         """Support legacy active/inactive filters and new lifecycle status values."""

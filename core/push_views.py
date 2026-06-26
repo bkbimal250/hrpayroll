@@ -15,6 +15,7 @@ from django.http import JsonResponse, HttpResponse
 import json
 import logging
 from datetime import datetime
+from json import JSONDecodeError
 
 from .attendance_processing import record_raw_punch
 from .models import Device, CustomUser, Attendance, ESSLAttendanceLog
@@ -85,25 +86,21 @@ class DevicePushDataView(views.APIView):
                 logger.warning(f"ESSL device {device_id} from IP {device_ip} sent {table} data with stamp {stamp} - ESSL not supported, access denied")
                 return HttpResponse("ESSL devices not supported", status=403)
 
+            data = {}
+
             # Handle JSON data
-            elif request.content_type == 'application/json':
-                data = request.data
+            if request.content_type == 'application/json':
+                try:
+                    data = request.data if isinstance(request.data, dict) else {}
+                except (JSONDecodeError, ValueError) as exc:
+                    logger.warning("Malformed JSON from device IP %s: %s", device_ip, exc)
+                    return Response({
+                        'success': False,
+                        'error': 'malformed_json',
+                        'message': 'Request body must be valid JSON.'
+                    }, status=status.HTTP_400_BAD_REQUEST)
                 device_id = data.get('device_id') or data.get('deviceId') or data.get('SN')
                 device_name = data.get('device_name') or data.get('deviceName')
-                
-                # Handle ZKTeco specific data format
-                if device.device_type == 'zkteco':
-                    logger.info(f"Processing ZKTeco push data from {device.name}")
-                    # ZKTeco devices might send data in different formats
-                    if 'attendance_records' not in data and 'records' not in data:
-                        # Single record format
-                        single_record = {
-                            'user_id': data.get('user_id') or data.get('uid'),
-                            'timestamp': data.get('timestamp') or data.get('punch_time'),
-                            'type': data.get('type') or data.get('punch_type', 'check_in'),
-                            'status': data.get('status', 0)
-                        }
-                        data['attendance_records'] = [single_record]
             else:
                 # Try to parse as form data
                 try:
@@ -114,7 +111,8 @@ class DevicePushDataView(views.APIView):
                         data[key] = value[0] if len(value) == 1 else value
                     device_id = data.get('device_id') or data.get('deviceId') or data.get('SN')
                     device_name = data.get('device_name') or data.get('deviceName')
-                except:
+                except Exception as exc:
+                    logger.warning("Unable to parse device payload from IP %s: %s", device_ip, exc)
                     data = {}
 
             # Check if device exists in database
@@ -122,15 +120,33 @@ class DevicePushDataView(views.APIView):
             
             if not device:
                 logger.warning(f"Unknown device {device_id} from IP {device_ip} - Access denied")
-                return HttpResponse("Access Denied", status=403)
+                return Response({
+                    'success': False,
+                    'error': 'unknown_device',
+                    'message': 'Device is not registered or is not allowed.'
+                }, status=status.HTTP_403_FORBIDDEN)
             
             # Only allow ZKTeco devices
             if device.device_type != 'zkteco':
                 logger.warning(f"Non-ZKTeco device {device.name} (type: {device.device_type}) from IP {device_ip} - Only ZKTeco devices allowed, access denied")
-                return HttpResponse("Only ZKTeco devices allowed", status=403)
+                return Response({
+                    'success': False,
+                    'error': 'unsupported_device',
+                    'message': 'Only registered ZKTeco devices are allowed.'
+                }, status=status.HTTP_403_FORBIDDEN)
             
             # Log device type for debugging
             logger.info(f"Processing data from {device.device_type} device: {device.name}")
+
+            # ZKTeco devices might send a single JSON record instead of a list.
+            if request.content_type == 'application/json' and 'attendance_records' not in data and 'records' not in data and 'data' not in data:
+                data['attendance_records'] = [{
+                    'user_id': data.get('user_id') or data.get('uid'),
+                    'biometric_id': data.get('biometric_id') or data.get('biometricId'),
+                    'timestamp': data.get('timestamp') or data.get('punch_time'),
+                    'type': data.get('type') or data.get('punch_type', 'check_in'),
+                    'status': data.get('status', 0)
+                }]
 
             # Process attendance records
             attendance_records = data.get('attendance_records', [])
@@ -138,6 +154,14 @@ class DevicePushDataView(views.APIView):
                 attendance_records = data.get('records', [])
                 if not attendance_records:
                     attendance_records = data.get('data', [])
+            if isinstance(attendance_records, dict):
+                attendance_records = [attendance_records]
+            if not isinstance(attendance_records, list):
+                return Response({
+                    'success': False,
+                    'error': 'invalid_records',
+                    'message': 'Attendance records must be a list or object.'
+                }, status=status.HTTP_400_BAD_REQUEST)
 
             processed_count = 0
             error_count = 0
@@ -167,8 +191,12 @@ class DevicePushDataView(views.APIView):
             }, status=status.HTTP_200_OK)
 
         except Exception as e:
-            logger.error(f"Error processing pushed attendance data: {str(e)}")
-            return HttpResponse("Access Denied", status=403)
+            logger.exception("Error processing pushed attendance data")
+            return Response({
+                'success': False,
+                'error': 'ingest_failed',
+                'message': 'Attendance data could not be processed.'
+            }, status=status.HTTP_400_BAD_REQUEST)
 
     def _get_existing_device(self, device_ip, device_id):
         """Get existing device from database - NO AUTO CREATION"""

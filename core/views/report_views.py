@@ -40,6 +40,7 @@ from ..serializers import (
     ResignationCreateSerializer, ResignationAdminUpdateSerializer, ResignationApprovalSerializer, DepartmentSerializer, DesignationSerializer,
     ShiftSerializer, EmployeeShiftAssignmentSerializer, EmployeeStatusAuditLogSerializer,
     BiometricAssignmentHistorySerializer, PasswordChangeHistorySerializer, AttendanceAuditLogSerializer,
+    ManagerEmployeeListSerializer,
     DuplicatePunchAttemptSerializer, UnmatchedBiometricPunchSerializer
 )
 # Permissions are defined inline in this file
@@ -862,6 +863,10 @@ class DashboardViewSet(viewsets.ViewSet):
                 active_users = CustomUser.objects.filter(employment_status__in=operational_statuses).count()
                 total_users = CustomUser.objects.count()
                 inactive_users = total_users - active_users
+                lifecycle_counts = {
+                    item['employment_status']: item['total']
+                    for item in CustomUser.objects.values('employment_status').annotate(total=Count('id'))
+                }
                 
                 # Growth statistics (comparing with last month)
                 last_month_employees = CustomUser.objects.filter(
@@ -888,6 +893,7 @@ class DashboardViewSet(viewsets.ViewSet):
                     'active_users': active_users,
                     'inactive_users': inactive_users,
                     'total_users': total_users,
+                    'lifecycle_counts': lifecycle_counts,
                     'employee_growth': round(employee_growth, 2),
                     'user_activation_rate': round((active_users / total_users * 100), 2) if total_users > 0 else 0,
                 }
@@ -934,6 +940,10 @@ class DashboardViewSet(viewsets.ViewSet):
                     employment_status__in=['active', 'notice_period']
                 ).count()
                 total_users = CustomUser.objects.filter(office=office).count()
+                lifecycle_counts = {
+                    item['employment_status']: item['total']
+                    for item in CustomUser.objects.filter(office=office).values('employment_status').annotate(total=Count('id'))
+                }
                 
                 stats = {
                     'total_employees': total_employees,
@@ -950,6 +960,7 @@ class DashboardViewSet(viewsets.ViewSet):
                     'leave_approval_rate': round(leave_approval_rate, 2),
                     'active_users': active_users,
                     'total_users': total_users,
+                    'lifecycle_counts': lifecycle_counts,
                     'user_activation_rate': round((active_users / total_users * 100), 2) if total_users > 0 else 0,
                     'employee_growth': 0,  # Not applicable for managers
                 }
@@ -1128,8 +1139,9 @@ class DashboardViewSet(viewsets.ViewSet):
         search = request.query_params.get('search', '')
         department = request.query_params.get('department', '')
         status = request.query_params.get('status', '')
+        is_active = request.query_params.get('is_active')
         page = int(request.query_params.get('page', 1))
-        page_size = int(request.query_params.get('page_size', 10))
+        page_size = min(int(request.query_params.get('page_size', 10)), 100)
         
         # Build queryset for office employees
         queryset = CustomUser.objects.filter(
@@ -1137,7 +1149,7 @@ class DashboardViewSet(viewsets.ViewSet):
             role='employee'
         ).select_related('office', 'department', 'designation')
         
-        # Apply filters
+        # Apply filters used by the manager dashboard.
         if search:
             queryset = queryset.filter(
                 Q(first_name__icontains=search) |
@@ -1148,12 +1160,21 @@ class DashboardViewSet(viewsets.ViewSet):
         
         if department:
             queryset = queryset.filter(department__name__icontains=department)
+
+        counts = queryset.aggregate(
+            active_count=Count('id', filter=Q(is_active=True)),
+            inactive_count=Count('id', filter=Q(is_active=False)),
+        )
         
         if status:
             if status == 'active':
                 queryset = queryset.filter(is_active=True)
             elif status == 'inactive':
                 queryset = queryset.filter(is_active=False)
+        elif is_active in ['true', '1', 'yes']:
+            queryset = queryset.filter(is_active=True)
+        elif is_active in ['false', '0', 'no']:
+            queryset = queryset.filter(is_active=False)
         
         # Pagination
         total_count = queryset.count()
@@ -1162,7 +1183,7 @@ class DashboardViewSet(viewsets.ViewSet):
         employees = queryset[start:end]
         
         # Serialize data
-        serializer = CustomUserSerializer(employees, many=True, context={'request': request})
+        serializer = ManagerEmployeeListSerializer(employees, many=True, context={'request': request})
         
         return Response({
             'results': serializer.data,
@@ -1170,6 +1191,8 @@ class DashboardViewSet(viewsets.ViewSet):
             'page': page,
             'page_size': page_size,
             'total_pages': (total_count + page_size - 1) // page_size,
+            'active_count': counts['active_count'],
+            'inactive_count': counts['inactive_count'],
             'office_name': office.name,
             'office_id': str(office.id)
         })

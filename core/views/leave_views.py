@@ -217,5 +217,11 @@ class LeaveViewSet(viewsets.ModelViewSet):
     def pending(self, request):
         """Get pending leave requests"""
         queryset = self.get_queryset().filter(status='pending')
+        page_size = request.query_params.get('page_size') or request.query_params.get('limit')
+        if page_size:
+            try:
+                queryset = queryset[:min(int(page_size), 100)]
+            except (TypeError, ValueError):
+                pass
         serializer = self.get_serializer(queryset, many=True)
         return Response(serializer.data)

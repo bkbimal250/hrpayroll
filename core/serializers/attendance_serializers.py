@@ -187,6 +187,7 @@ class DashboardStatsSerializer(serializers.Serializer):
     active_users = serializers.IntegerField()
     inactive_users = serializers.IntegerField(required=False)
     total_users = serializers.IntegerField()
+    lifecycle_counts = serializers.DictField(child=serializers.IntegerField(), required=False)
     employee_growth = serializers.FloatField(required=False)
     user_activation_rate = serializers.FloatField()
 

@@ -638,8 +638,12 @@ class CustomUserViewSet(viewsets.ModelViewSet):
             queryset = queryset.filter(office_id=office)
 
         statuses = ['active', 'notice_period', 'left', 'terminated', 'suspended', 'archived']
-        counts = {s: queryset.filter(employment_status=s).count() for s in statuses}
-        counts['total'] = queryset.count()
+        grouped_counts = {
+            item['employment_status']: item['total']
+            for item in queryset.values('employment_status').annotate(total=Count('id'))
+        }
+        counts = {status_value: grouped_counts.get(status_value, 0) for status_value in statuses}
+        counts['total'] = sum(grouped_counts.values())
 
         return Response({
             'totalUsers':        counts['total'],

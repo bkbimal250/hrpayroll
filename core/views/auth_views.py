@@ -96,7 +96,7 @@ class IsAdminOrHRNoDelete(IsAuthenticated):
     def has_permission(self, request, view):
         if not super().has_permission(request, view):
             return False
-        if request.user.is_admin:
+        if request.user.is_superuser or request.user.is_admin:
             return True
         if request.user.is_hr and request.method != 'DELETE':
             return True
@@ -351,6 +351,8 @@ class CustomUserViewSet(viewsets.ModelViewSet):
             return [IsAdminOrManagerOrHRNoDelete()]
         elif self.action in ['reset_password']:
             return [IsAdminOrManagerOrHR()]
+        elif self.action in ['financial_details']:
+            return [IsAdminOrHRNoDelete()]
         elif self.action in ['list', 'retrieve', 'by_status', 'all_search', 'full_history']:
             return [IsAdminOrManagerOrAccountantOrHR()]
         return [permissions.IsAuthenticated()]
@@ -370,6 +372,23 @@ class CustomUserViewSet(viewsets.ModelViewSet):
             'biometric_assignment_history': BiometricAssignmentHistory.objects.filter(employee=employee).count(),
             'password_change_history': PasswordChangeHistory.objects.filter(employee=employee).count(),
         }
+
+    @action(detail=True, methods=['get'])
+    def financial_details(self, request, pk=None):
+        """Return unmasked bank details for HR/admin financial verification."""
+        if not (request.user.is_superuser or request.user.is_admin or request.user.is_hr):
+            return Response({'error': 'Admin or HR access required'}, status=status.HTTP_403_FORBIDDEN)
+
+        employee = self.get_object()
+        return Response({
+            'id': str(employee.id),
+            'account_holder_name': employee.account_holder_name or '',
+            'bank_name': employee.bank_name or '',
+            'account_number': employee.account_number or '',
+            'ifsc_code': employee.ifsc_code or '',
+            'bank_branch_name': employee.bank_branch_name or '',
+            'bank_account_updated_at': employee.bank_account_updated_at,
+        })
 
     def _change_employee_status(self, employee, new_status, request, **defaults):
         remarks = request.data.get('remarks') or request.data.get('reason') or request.data.get('status_change_remarks') or ''

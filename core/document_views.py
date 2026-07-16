@@ -1567,6 +1567,22 @@ class DocumentGenerationViewSet(viewsets.ViewSet):
                     display_absent_days = attendance_qs.filter(
                         Q(status='absent') | Q(day_status='absent')
                     ).distinct().count()
+
+                    if present_days is None or present_days == 0:
+                        try:
+                            fallback_worked_days = float(worked_days or 0)
+                            if fallback_worked_days > 0:
+                                present_days = int(fallback_worked_days)
+                        except (ValueError, TypeError):
+                            pass
+
+                    if display_absent_days is None:
+                        try:
+                            total_days_value = int(total_days or 0)
+                            present_days_value = int(present_days or 0)
+                            display_absent_days = max(0, total_days_value - present_days_value)
+                        except (ValueError, TypeError):
+                            display_absent_days = 0
                 except Exception as e:
                     logger.warning(f"Unable to fetch attendance summary for salary slip {salary_record.id}: {e}")
                 
@@ -1607,7 +1623,17 @@ class DocumentGenerationViewSet(viewsets.ViewSet):
                 final_salary = float(data.get('final_salary', 0))
                 basic_pay = float(data.get('basic_pay', 0))
                 present_days = data.get('present_days', data.get('attendance_present_days', None))
+                if present_days in [None, '', 0]:
+                    try:
+                        present_days = int(float(worked_days or 0))
+                    except (ValueError, TypeError):
+                        present_days = 0
                 display_absent_days = data.get('absent_days', 0)
+                if display_absent_days in [None, '', 0]:
+                    try:
+                        display_absent_days = max(0, int(total_days or 0) - int(present_days or 0))
+                    except (ValueError, TypeError):
+                        display_absent_days = 0
                 
                 salary_month = data.get('salary_month', '')
                 salary_year = data.get('salary_year', '')

@@ -1118,6 +1118,70 @@ class Notification(models.Model):
 
 
 
+class BirthdayNotificationLog(models.Model):
+    """Idempotency and delivery audit log for employee birthday notifications."""
+
+    NOTIFICATION_TYPE_CHOICES = [
+        ('advance_reminder', 'Advance Reminder'),
+        ('today_reminder', 'Birthday Today Reminder'),
+        ('employee_wish', 'Employee Birthday Wish'),
+    ]
+
+    CHANNEL_CHOICES = [
+        ('in_app', 'In-app'),
+        ('email', 'Email'),
+    ]
+
+    STATUS_CHOICES = [
+        ('sent', 'Sent'),
+        ('skipped', 'Skipped'),
+        ('failed', 'Failed'),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    employee = models.ForeignKey(
+        CustomUser,
+        on_delete=models.CASCADE,
+        related_name='birthday_notification_logs',
+    )
+    recipient = models.ForeignKey(
+        CustomUser,
+        on_delete=models.CASCADE,
+        related_name='received_birthday_notification_logs',
+    )
+    birthday_year = models.PositiveIntegerField()
+    notification_type = models.CharField(max_length=30, choices=NOTIFICATION_TYPE_CHOICES)
+    channel = models.CharField(max_length=10, choices=CHANNEL_CHOICES)
+    status = models.CharField(max_length=10, choices=STATUS_CHOICES)
+    notification = models.ForeignKey(
+        Notification,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='birthday_delivery_logs',
+    )
+    sent_at = models.DateTimeField(null=True, blank=True)
+    error_message = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['employee', 'recipient', 'birthday_year', 'notification_type', 'channel'],
+                name='unique_birthday_delivery',
+            )
+        ]
+        indexes = [
+            models.Index(fields=['birthday_year', 'notification_type', 'channel']),
+            models.Index(fields=['recipient', 'status']),
+        ]
+
+    def __str__(self):
+        return f"{self.notification_type} {self.channel} for {self.employee} to {self.recipient}"
+
+
 class SystemSettings(models.Model):
     """System settings model for configuration"""
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)

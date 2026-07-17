@@ -17,7 +17,7 @@ from .models import (
     WorkingHoursSettings, Resignation, DocumentTemplate, GeneratedDocument,
     Department, Designation, Shift, EmployeeShiftAssignment, BankAccountHistory,
     EmployeeStatusAuditLog, BiometricAssignmentHistory, PasswordChangeHistory, AttendanceAuditLog,
-    DuplicatePunchAttempt, UnmatchedBiometricPunch
+    DuplicatePunchAttempt, UnmatchedBiometricPunch, BirthdayNotificationLog
 )
 
 from unfold.admin import ModelAdmin as UnfoldModelAdmin
@@ -109,6 +109,52 @@ class PasswordChangeHistoryAdmin(UnfoldModelAdmin):
     list_filter = ['changed_by_role', 'created_at']
     search_fields = ['employee__username', 'employee__first_name', 'employee__last_name', 'changed_by__username', 'reason']
     readonly_fields = ['id', 'employee', 'changed_by', 'changed_by_role', 'reason', 'created_at']
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(BirthdayNotificationLog)
+class BirthdayNotificationLogAdmin(UnfoldModelAdmin):
+    list_display = [
+        'employee',
+        'recipient',
+        'birthday_year',
+        'notification_type',
+        'channel',
+        'status',
+        'sent_at',
+        'created_at',
+    ]
+    list_filter = ['birthday_year', 'notification_type', 'channel', 'status', 'created_at']
+    search_fields = [
+        'employee__username',
+        'employee__first_name',
+        'employee__last_name',
+        'employee__employee_id',
+        'recipient__username',
+        'recipient__first_name',
+        'recipient__last_name',
+        'recipient__email',
+        'error_message',
+    ]
+    readonly_fields = [
+        'id',
+        'employee',
+        'recipient',
+        'birthday_year',
+        'notification_type',
+        'channel',
+        'status',
+        'notification',
+        'sent_at',
+        'error_message',
+        'created_at',
+        'updated_at',
+    ]
 
     def has_add_permission(self, request):
         return False

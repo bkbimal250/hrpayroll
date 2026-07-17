@@ -1,6 +1,7 @@
 import os
 from pathlib import Path
 from datetime import timedelta
+from celery.schedules import crontab
 from django.utils.translation import gettext_lazy as _
 from dotenv import load_dotenv
 
@@ -360,6 +361,12 @@ CELERY_ACCEPT_CONTENT = ['json']
 CELERY_TASK_SERIALIZER = 'json'
 CELERY_RESULT_SERIALIZER = 'json'
 CELERY_TIMEZONE = TIME_ZONE
+CELERY_BEAT_SCHEDULE = {
+    'process-daily-employee-birthdays-9am-ist': {
+        'task': 'core.tasks.process_daily_employee_birthdays',
+        'schedule': crontab(hour=9, minute=0),
+    },
+}
 DEFAULT_CHANNEL_LAYER_BACKEND = (
     'channels.layers.InMemoryChannelLayer'
     if ENVIRONMENT == 'development'

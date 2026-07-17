@@ -61,7 +61,12 @@ class NotificationService:
                 created_by=created_by
             )
             
-            logger.info(f"Created notification: {title} for user {user.get_full_name()}")
+            logger.info(
+                "Created notification id=%s type=%s for user %s",
+                notification.id,
+                notification_type,
+                user.id,
+            )
             
             # Send email notification only in production, if requested and user has email.
             if send_email and not notification_emails_enabled():

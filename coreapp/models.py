@@ -144,3 +144,22 @@ class Holiday(models.Model):
         return f"{self.name} - {self.date}"
 
 
+
+class HappyBirthday(models.Model):
+    employee = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='birthdays',
+        db_column='employee_id'
+    )
+    birthday_date = models.DateField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['birthday_date']
+        verbose_name = "Happy Birthday"
+        verbose_name_plural = "Happy Birthdays"
+
+    def __str__(self):
+        return f"{self.employee.get_full_name()} - {self.birthday_date}"

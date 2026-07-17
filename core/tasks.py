@@ -12,6 +12,13 @@ from decimal import Decimal
 logger = logging.getLogger(__name__)
 
 
+@shared_task(bind=True)
+def process_daily_employee_birthdays(self):
+    from .birthday_notifications import process_daily_employee_birthdays as process_birthdays
+
+    return process_birthdays()
+
+
 def _get_job(job_id):
     return AsyncJob.objects.get(id=job_id)
 

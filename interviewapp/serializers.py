@@ -22,8 +22,8 @@ RESUME_CONTENT_TYPES = {
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
 }
 PHOTO_CONTENT_TYPES = {"image/jpeg", "image/png", "image/webp"}
-MAX_RESUME_SIZE = 5 * 1024 * 1024
-MAX_PHOTO_SIZE = 3 * 1024 * 1024
+MAX_RESUME_SIZE = 10 * 1024 * 1024
+MAX_PHOTO_SIZE = 10 * 1024 * 1024
 
 
 def normalize_phone(value):

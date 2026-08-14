@@ -233,6 +233,7 @@ class CandidateCheckInSerializer(serializers.ModelSerializer):
         extra_kwargs = {
             "full_name": {"required": False, "allow_blank": True},
             "phone": {"required": True},
+            "pan_number": {"required": False, "allow_blank": True, "allow_null": True},
             "interview_date": {"required": False},
         }
 

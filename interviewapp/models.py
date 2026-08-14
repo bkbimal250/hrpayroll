@@ -65,7 +65,7 @@ class InterviewCandidate(models.Model):
     remarks = models.TextField(blank=True)
 
     aadhaar_number = models.CharField(max_length=12, blank=True, db_index=True)
-    pan_number = models.CharField(max_length=10, blank=True, db_index=True)
+    pan_number = models.CharField(max_length=10, blank=True, null=True, db_index=True)
 
     resume = models.FileField(upload_to=candidate_resume_upload_path, null=True, blank=True)
     photo = models.ImageField(upload_to=candidate_photo_upload_path, null=True, blank=True)

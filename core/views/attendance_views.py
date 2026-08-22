@@ -143,8 +143,10 @@ class AttendanceViewSet(viewsets.ModelViewSet):
         elif not include_inactive:
             base_queryset = base_queryset.filter(user__employment_status__in=['active', 'notice_period'])
         
-        if user.is_admin or user.is_hr:
+        if user.is_admin:
             return base_queryset
+        elif user.is_hr:
+            return base_queryset.exclude(user__role='admin')
         elif user.is_manager:
             return base_queryset.filter(user__office=user.office)
         elif user.is_accountant:
@@ -344,6 +346,25 @@ class AttendanceViewSet(viewsets.ModelViewSet):
                     {'error': 'User not found or not eligible for operational attendance'},
                     status=status.HTTP_404_NOT_FOUND
                 )
+
+            if request.user.is_hr and user.role == 'admin':
+                return Response(
+                    {'error': 'HR cannot view admin attendance'},
+                    status=status.HTTP_403_FORBIDDEN
+                )
+
+            if not (request.user.is_superuser or request.user.is_admin or request.user.is_hr):
+                if request.user.is_manager:
+                    if user.office_id != request.user.office_id:
+                        return Response(
+                            {'error': 'Managers can only view attendance for employees in their office'},
+                            status=status.HTTP_403_FORBIDDEN
+                        )
+                elif user.id != request.user.id:
+                    return Response(
+                        {'error': 'You can only view your own attendance'},
+                        status=status.HTTP_403_FORBIDDEN
+                    )
             
             # Create target date for the month and capture today's date once
             target_date = date(year, month, 1)
@@ -557,15 +578,14 @@ class AttendanceViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=['post'])
     def update_status(self, request):
-        """Update attendance status for a specific date - Only for managers and admins"""
+        """Update attendance status for a specific date."""
         print(f"update_status called with data: {request.data}")
         print(f"User: {request.user.username}, Role: {request.user.role}")
         
         try:
-            # Check if user has permission (manager or admin)
-            if request.user.role not in ['manager', 'admin']:
+            if request.user.role not in ['manager', 'admin', 'hr']:
                 return Response(
-                    {'error': 'Only managers and admins can update attendance status'}, 
+                    {'error': 'Only admins, HR, and managers can update attendance status'},
                     status=status.HTTP_403_FORBIDDEN
                 )
             
@@ -604,6 +624,18 @@ class AttendanceViewSet(viewsets.ModelViewSet):
                 return Response(
                     {'error': 'User not found or not eligible for operational attendance'},
                     status=status.HTTP_404_NOT_FOUND
+                )
+
+            if request.user.is_hr and user.role == 'admin':
+                return Response(
+                    {'error': 'HR cannot update admin attendance'},
+                    status=status.HTTP_403_FORBIDDEN
+                )
+
+            if request.user.is_manager and user.office_id != request.user.office_id:
+                return Response(
+                    {'error': 'Managers can only update attendance for employees in their office'},
+                    status=status.HTTP_403_FORBIDDEN
                 )
             
             # Parse the date

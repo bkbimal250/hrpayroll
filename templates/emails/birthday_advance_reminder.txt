@@ -1,0 +1,13 @@
+Hello {{ recipient_name }},
+
+This is a friendly reminder that tomorrow is {{ employee_full_name }}'s birthday.
+
+Employee ID: {{ employee_id }}
+Department: {{ department }}
+Designation: {{ designation }}
+Birthday: {{ birthday_date }}
+
+Please remember to wish them and help make their day special.
+
+Regards,
+HR & Attendance Portal

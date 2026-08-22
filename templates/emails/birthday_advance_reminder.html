@@ -1,0 +1,33 @@
+<!doctype html>
+<html>
+  <body style="margin:0;padding:0;background:#f6f8fb;font-family:Arial,Helvetica,sans-serif;color:#1f2937;">
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#f6f8fb;padding:24px 12px;">
+      <tr>
+        <td align="center">
+          <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:620px;background:#ffffff;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;">
+            <tr>
+              <td style="padding:24px;border-bottom:1px solid #e5e7eb;background:#eef6ff;">
+                <h1 style="margin:0;font-size:22px;color:#0f172a;">Birthday Reminder</h1>
+                <p style="margin:8px 0 0;font-size:14px;color:#475569;">{{ company_name }}</p>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:24px;font-size:15px;line-height:1.6;">
+                <p>Hello {{ recipient_name }},</p>
+                <p>This is a friendly reminder that tomorrow is <strong>{{ employee_full_name }}</strong>'s birthday.</p>
+                <table role="presentation" cellspacing="0" cellpadding="0" style="width:100%;margin:16px 0;border-collapse:collapse;">
+                  <tr><td style="padding:8px;border:1px solid #e5e7eb;">Employee ID</td><td style="padding:8px;border:1px solid #e5e7eb;">{{ employee_id }}</td></tr>
+                  <tr><td style="padding:8px;border:1px solid #e5e7eb;">Department</td><td style="padding:8px;border:1px solid #e5e7eb;">{{ department }}</td></tr>
+                  <tr><td style="padding:8px;border:1px solid #e5e7eb;">Designation</td><td style="padding:8px;border:1px solid #e5e7eb;">{{ designation }}</td></tr>
+                  <tr><td style="padding:8px;border:1px solid #e5e7eb;">Birthday</td><td style="padding:8px;border:1px solid #e5e7eb;">{{ birthday_date }}</td></tr>
+                </table>
+                <p>Please remember to wish them and help make their day special.</p>
+                <p style="margin-bottom:0;">Regards,<br>HR &amp; Attendance Portal</p>
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>

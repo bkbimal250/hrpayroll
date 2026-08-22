@@ -1,0 +1,7 @@
+Happy Birthday, {{ employee_first_name }}!
+
+Wishing you a wonderful day filled with happiness, success and memorable moments.
+
+Thank you for being a valued member of our team.
+
+Best wishes from everyone at {{ company_name }}!

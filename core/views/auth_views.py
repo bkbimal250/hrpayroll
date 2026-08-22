@@ -17,7 +17,7 @@ import traceback
 import sys
 from django.core.exceptions import ValidationError
 from django.contrib.auth.password_validation import validate_password
-from rest_framework.exceptions import APIException, ValidationError as DRFValidationError
+from rest_framework.exceptions import APIException, PermissionDenied, ValidationError as DRFValidationError
 
 from ..models import (
     CustomUser, Office, Device, DeviceUser, Attendance, WorkingHoursSettings, 
@@ -373,6 +373,31 @@ class CustomUserViewSet(viewsets.ModelViewSet):
             'password_change_history': PasswordChangeHistory.objects.filter(employee=employee).count(),
         }
 
+    def _prepare_user_write_data(self, request, instance=None):
+        """Constrain manager user-management writes to office employees."""
+        data = request.data.copy()
+        actor = request.user
+
+        if actor.is_manager:
+            if not actor.office_id:
+                raise DRFValidationError({'office': 'Managers must be assigned to an office before managing employees.'})
+
+            if instance and (instance.id == actor.id or instance.role != 'employee' or instance.office_id != actor.office_id):
+                raise PermissionDenied('Managers can only update employee users in their own office.')
+
+            data['role'] = 'employee'
+            data['office'] = str(actor.office_id)
+
+        return data
+
+    def create(self, request, *args, **kwargs):
+        data = self._prepare_user_write_data(request)
+        serializer = self.get_serializer(data=data)
+        serializer.is_valid(raise_exception=True)
+        self.perform_create(serializer)
+        headers = self.get_success_headers(serializer.data)
+        return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
+
     @action(detail=True, methods=['get'])
     def financial_details(self, request, pk=None):
         """Return unmasked bank details for HR/admin financial verification."""
@@ -391,6 +416,16 @@ class CustomUserViewSet(viewsets.ModelViewSet):
         })
 
     def _change_employee_status(self, employee, new_status, request, **defaults):
+        if request.user.is_manager and (
+            employee.id == request.user.id or
+            employee.role != 'employee' or
+            employee.office_id != request.user.office_id
+        ):
+            return Response(
+                {'error': 'Managers can only change status for employee users in their own office.'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
         remarks = request.data.get('remarks') or request.data.get('reason') or request.data.get('status_change_remarks') or ''
         update_fields = dict(defaults)
 
@@ -420,6 +455,15 @@ class CustomUserViewSet(viewsets.ModelViewSet):
     def destroy(self, request, *args, **kwargs):
         """Archive employees instead of permanently deleting linked HR history."""
         employee = self.get_object()
+        if request.user.is_manager and (
+            employee.id == request.user.id or
+            employee.role != 'employee' or
+            employee.office_id != request.user.office_id
+        ):
+            return Response(
+                {'error': 'Managers can only archive employee users in their own office.'},
+                status=status.HTTP_403_FORBIDDEN
+            )
         employee.set_employment_status(
             'archived',
             changed_by=request.user,
@@ -507,6 +551,15 @@ class CustomUserViewSet(viewsets.ModelViewSet):
 
         if not (actor.is_superuser or actor.is_admin or actor.is_hr or actor.is_manager):
             return Response({'error': 'You do not have permission to reset passwords.'}, status=status.HTTP_403_FORBIDDEN)
+        if actor.is_manager and (
+            employee.id == actor.id or
+            employee.role != 'employee' or
+            employee.office_id != actor.office_id
+        ):
+            return Response(
+                {'error': 'Managers can only reset passwords for employee users in their own office.'},
+                status=status.HTTP_403_FORBIDDEN
+            )
 
         new_password = request.data.get('new_password') or request.data.get('password')
         confirm_password = request.data.get('confirm_password') or request.data.get('password_confirm') or new_password
@@ -947,6 +1000,7 @@ class CustomUserViewSet(viewsets.ModelViewSet):
 
     def update(self, request, *args, **kwargs):
         """Override update to detect bank account changes"""
+        partial = kwargs.pop('partial', False)
         instance = self.get_object()
         
         # Store old bank account values before update (as dictionary for JSON storage)
@@ -957,8 +1011,15 @@ class CustomUserViewSet(viewsets.ModelViewSet):
         
         old_upi_qr = str(instance.upi_qr) if instance.upi_qr else None
         
-        # Perform the update
-        response = super().update(request, *args, **kwargs)
+        data = self._prepare_user_write_data(request, instance=instance)
+        serializer = self.get_serializer(instance, data=data, partial=partial)
+        serializer.is_valid(raise_exception=True)
+        self.perform_update(serializer)
+
+        if getattr(instance, '_prefetched_objects_cache', None):
+            instance._prefetched_objects_cache = {}
+
+        response = Response(serializer.data)
         
         # Check if bank account fields changed
         if response.status_code == status.HTTP_200_OK:
@@ -985,46 +1046,8 @@ class CustomUserViewSet(viewsets.ModelViewSet):
     
     def partial_update(self, request, *args, **kwargs):
         """Override partial_update to detect bank account changes"""
-        instance = self.get_object()
-        
-        # Store old bank account values before update (as dictionary for JSON storage)
-        bank_fields = ['account_holder_name', 'bank_name', 'account_number', 'ifsc_code', 'bank_branch_name']
-        old_bank_values = {}
-        for field in bank_fields:
-            old_bank_values[field] = getattr(instance, field, None) or ''
-        
-        old_upi_qr = str(instance.upi_qr) if instance.upi_qr else None
-        
-        # Perform the partial update
-        response = super().partial_update(request, *args, **kwargs)
-        
-        # Check if bank account fields changed
-        if response.status_code == status.HTTP_200_OK:
-            instance.refresh_from_db()
-            changed_fields = {}
-            
-            # Only check fields that were actually updated
-            updated_fields = request.data.keys()
-            
-            for field in bank_fields:
-                if field in updated_fields:
-                    new_value = getattr(instance, field, None) or ''
-                    old_value = old_bank_values.get(field, '')
-                    if old_value != new_value:
-                        changed_fields[field] = (old_value, new_value)
-            
-            # Check UPI QR change
-            if 'upi_qr' in updated_fields:
-                new_upi_qr = str(instance.upi_qr) if instance.upi_qr else None
-                if old_upi_qr != new_upi_qr:
-                    changed_fields['upi_qr'] = (old_upi_qr, new_upi_qr)
-            
-            # Send notifications if bank account fields changed
-            if changed_fields:
-                from ..notification_service import notify_bank_account_updated
-                notify_bank_account_updated(instance, request.user, changed_fields)
-        
-        return response
+        kwargs['partial'] = True
+        return self.update(request, *args, **kwargs)
 
     @action(detail=False, methods=['get'])
     def debug_auth(self, request):

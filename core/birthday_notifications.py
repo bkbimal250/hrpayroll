@@ -16,8 +16,8 @@ from .notification_service import NotificationService
 logger = logging.getLogger(__name__)
 
 
-BIRTHDAY_MANAGEMENT_ROLES = ('admin', 'hr', 'accountant')
-ACTIVE_EMPLOYMENT_STATUSES = ('active', 'notice_period')
+BIRTHDAY_REMINDER_ROLES = ('admin', 'hr', 'employee')
+ACTIVE_EMPLOYMENT_STATUSES = ('active',)
 
 
 @dataclass
@@ -63,12 +63,26 @@ def get_active_birthday_employees():
     )
 
 
-def get_authorized_recipients():
-    return CustomUser.objects.filter(
+def get_birthday_reminder_recipients(employee=None):
+    recipients = CustomUser.objects.filter(is_active=True).filter(
+        role__in=BIRTHDAY_REMINDER_ROLES,
+    )
+
+    employee_recipients = recipients.filter(role='employee').filter(
+        employment_status__in=ACTIVE_EMPLOYMENT_STATUSES,
+        archived_at__isnull=True,
+        exit_date__isnull=True,
+    )
+    admin_hr_recipients = recipients.filter(role__in=('admin', 'hr'))
+    recipients = admin_hr_recipients | employee_recipients | CustomUser.objects.filter(
         is_active=True,
-    ).filter(
-        role__in=BIRTHDAY_MANAGEMENT_ROLES,
-    ) | CustomUser.objects.filter(is_active=True, is_superuser=True)
+        is_superuser=True,
+    )
+
+    if employee:
+        recipients = recipients.exclude(id=employee.id)
+
+    return recipients.distinct()
 
 
 def employee_context(employee, target_date):
@@ -209,7 +223,6 @@ def process_daily_employee_birthdays(for_date=None, dry_run=False, employee_id=N
         employees_qs = employees_qs.filter(employee_id=employee_id)
 
     employees = list(employees_qs)
-    recipients = list(get_authorized_recipients().distinct())
     summary.employees_checked = len(employees)
 
     today_employees = [employee for employee in employees if is_birthday_on(employee.date_of_birth, today)]
@@ -218,6 +231,16 @@ def process_daily_employee_birthdays(for_date=None, dry_run=False, employee_id=N
     summary.tomorrow_birthdays_found = len(tomorrow_employees)
 
     if dry_run:
+        dry_run_employees = today_employees + tomorrow_employees
+        recipients = list(
+            CustomUser.objects.filter(
+                id__in=[
+                    recipient.id
+                    for employee in dry_run_employees
+                    for recipient in get_birthday_reminder_recipients(employee)
+                ]
+            ).distinct()
+        )
         return {
             **summary.as_dict(),
             'today': today.isoformat(),
@@ -229,6 +252,7 @@ def process_daily_employee_birthdays(for_date=None, dry_run=False, employee_id=N
         }
 
     for employee in tomorrow_employees:
+        recipients = list(get_birthday_reminder_recipients(employee))
         logger.info('birthday_employee_matched employee=%s timing=tomorrow', employee.id)
         ctx = employee_context(employee, tomorrow)
         title = 'Upcoming Employee Birthday 🎉'
@@ -265,6 +289,7 @@ def process_daily_employee_birthdays(for_date=None, dry_run=False, employee_id=N
             summary.failures += int(status == 'failed')
 
     for employee in today_employees:
+        recipients = list(get_birthday_reminder_recipients(employee))
         logger.info('birthday_employee_matched employee=%s timing=today', employee.id)
         ctx = employee_context(employee, today)
 

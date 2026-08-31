@@ -1,0 +1,13 @@
+Hello {{ recipient_name }},
+
+Today is {{ employee_full_name }}'s birthday.
+
+Please take a moment to send your birthday wishes.
+
+Employee ID: {{ employee_id }}
+Department: {{ department }}
+Designation: {{ designation }}
+Birthday: {{ birthday_date }}
+
+Regards,
+HR & Attendance Portal

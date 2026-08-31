@@ -201,8 +201,31 @@ class CustomUserSerializer(serializers.ModelSerializer):
         latest_resignation = Resignation.objects.filter(user=obj).order_by('-created_at').first()
         return latest_resignation.status if latest_resignation else None
 
+    def can_view_salary(self, obj):
+        request = self.context.get('request')
+        actor = getattr(request, 'user', None)
+        if not actor or not getattr(actor, 'is_authenticated', False):
+            return False
+        return bool(
+            getattr(actor, 'is_superuser', False) or
+            getattr(actor, 'is_admin', False) or
+            obj.id == actor.id
+        )
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        if not self.can_view_salary(instance):
+            data['salary'] = None
+        return data
+
     def validate(self, attrs):
         """Validate user data"""
+        request = self.context.get('request')
+        actor = getattr(request, 'user', None)
+        if 'salary' in attrs and actor and actor.is_authenticated:
+            if not (getattr(actor, 'is_superuser', False) or getattr(actor, 'is_admin', False)):
+                attrs.pop('salary', None)
+
         # Ensure managers have an office assigned
         if attrs.get('role') == 'manager' and not attrs.get('office'):
             raise serializers.ValidationError('Managers must be assigned to an office.')
@@ -345,6 +368,21 @@ class CustomUserListSerializer(serializers.ModelSerializer):
     def get_resignation_status(self, obj):
         return getattr(obj, 'latest_resignation_status', None)
 
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        request = self.context.get('request')
+        actor = getattr(request, 'user', None)
+        can_view_salary = bool(
+            actor and getattr(actor, 'is_authenticated', False) and (
+                getattr(actor, 'is_superuser', False) or
+                getattr(actor, 'is_admin', False) or
+                instance.id == actor.id
+            )
+        )
+        if not can_view_salary:
+            data['salary'] = None
+        return data
+
 
 def _mask_tail(value, visible=4):
     if not value:
@@ -374,6 +412,7 @@ class EmployeeSelfSerializer(serializers.ModelSerializer):
             'date_of_birth', 'gender', 'profile_picture', 'office',
             'office_name', 'department', 'department_name', 'designation',
             'designation_name', 'joining_date', 'employment_status',
+            'salary',
             'marital_status', 'emergency_contact_name',
             'emergency_contact_phone', 'emergency_contact_relationship',
             'account_holder_name', 'bank_name', 'account_number', 'ifsc_code',
@@ -404,6 +443,7 @@ class ManagerEmployeeListSerializer(serializers.ModelSerializer):
     department_name = serializers.CharField(source='department.name', read_only=True)
     designation_name = serializers.CharField(source='designation.name', read_only=True)
     full_name = serializers.SerializerMethodField()
+    salary = serializers.SerializerMethodField()
 
     class Meta:
         model = CustomUser
@@ -412,12 +452,19 @@ class ManagerEmployeeListSerializer(serializers.ModelSerializer):
             'role', 'employee_id', 'biometric_id', 'phone', 'profile_picture',
             'office', 'office_name', 'department', 'department_name',
             'designation', 'designation_name', 'joining_date',
-            'employment_status', 'is_active',
+            'employment_status', 'salary', 'is_active',
         ]
         read_only_fields = fields
 
     def get_full_name(self, obj):
         return obj.get_full_name()
+
+    def get_salary(self, obj):
+        request = self.context.get('request')
+        actor = getattr(request, 'user', None)
+        if actor and getattr(actor, 'is_authenticated', False) and obj.id == actor.id:
+            return str(obj.salary) if obj.salary is not None else None
+        return None
 
 
 class HREmployeeDetailSerializer(CustomUserSerializer):
@@ -441,7 +488,11 @@ class HREmployeeDetailSerializer(CustomUserSerializer):
         return _mask_tail(obj.ifsc_code)
 
     def get_salary(self, obj):
-        return str(obj.salary) if obj.salary is not None else None
+        request = self.context.get('request')
+        actor = getattr(request, 'user', None)
+        if actor and getattr(actor, 'is_authenticated', False) and obj.id == actor.id:
+            return str(obj.salary) if obj.salary is not None else None
+        return None
 
 
 class AdminEmployeeDetailSerializer(CustomUserSerializer):
@@ -643,6 +694,14 @@ class UserProfileSerializer(serializers.ModelSerializer):
         except (ValueError, TypeError):
             raise serializers.ValidationError("Invalid salary format")
         return value
+
+    def validate(self, attrs):
+        request = self.context.get('request')
+        actor = getattr(request, 'user', None)
+        if 'salary' in attrs and actor and actor.is_authenticated:
+            if not (actor.is_superuser or actor.is_admin):
+                attrs.pop('salary', None)
+        return attrs
     
     def validate_joining_date(self, value):
         """Validate joining date field"""
@@ -686,6 +745,19 @@ class UserProfileSerializer(serializers.ModelSerializer):
                 return request.build_absolute_uri(obj.profile_picture.url)
             return obj.profile_picture.url
         return None
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        request = self.context.get('request')
+        actor = getattr(request, 'user', None)
+        can_view_salary = bool(
+            actor and actor.is_authenticated and (
+                actor.is_superuser or actor.is_admin or instance.id == actor.id
+            )
+        )
+        if not can_view_salary:
+            data['salary'] = None
+        return data
 
 class PasswordChangeSerializer(serializers.Serializer):
     """Serializer for password change"""

@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import SalaryIncrement, SalaryIncrementHistory, Holiday
+from .models import SalaryIncrement, SalaryIncrementHistory, Holiday, HappyBirthday
 
 
 class SalaryIncrementSerializer(serializers.ModelSerializer):
@@ -168,3 +168,64 @@ class HolidaySerializer(serializers.ModelSerializer):
             'created_at',
             'updated_at',
         )
+
+
+class HappyBirthdaySerializer(serializers.ModelSerializer):
+    employee_name = serializers.CharField(source='employee.get_full_name', read_only=True)
+    employee_email = serializers.CharField(source='employee.email', read_only=True)
+    employee_employee_id = serializers.CharField(source='employee.employee_id', read_only=True)
+    employee_office_name = serializers.SerializerMethodField()
+    employee_department_name = serializers.SerializerMethodField()
+    employee_designation_name = serializers.SerializerMethodField()
+    employee_profile_picture_url = serializers.SerializerMethodField()
+    employee_employment_status = serializers.CharField(source='employee.employment_status', read_only=True)
+    employee_is_active = serializers.BooleanField(source='employee.is_active', read_only=True)
+
+    class Meta:
+        model = HappyBirthday
+        fields = [
+            'id',
+            'employee',
+            'employee_name',
+            'employee_email',
+            'employee_employee_id',
+            'employee_office_name',
+            'employee_department_name',
+            'employee_designation_name',
+            'employee_profile_picture_url',
+            'employee_employment_status',
+            'employee_is_active',
+            'birthday_date',
+            'created_at',
+            'updated_at',
+        ]
+        read_only_fields = fields
+
+    def get_employee_office_name(self, obj):
+        try:
+            return obj.employee.office.name if obj.employee.office else None
+        except AttributeError:
+            return None
+
+    def get_employee_department_name(self, obj):
+        try:
+            return obj.employee.department.name if obj.employee.department else None
+        except AttributeError:
+            return None
+
+    def get_employee_designation_name(self, obj):
+        try:
+            return obj.employee.designation.name if obj.employee.designation else None
+        except AttributeError:
+            return None
+
+    def get_employee_profile_picture_url(self, obj):
+        try:
+            if not obj.employee.profile_picture:
+                return None
+            request = self.context.get('request')
+            if request:
+                return request.build_absolute_uri(obj.employee.profile_picture.url)
+            return obj.employee.profile_picture.url
+        except AttributeError:
+            return None

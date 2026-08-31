@@ -172,39 +172,37 @@ class IsEmployeeOrManagerOrAdmin(permissions.BasePermission):
 class IsEmployeeSalaryAccess(permissions.BasePermission):
     """
     Custom permission for salary-related views.
-    Allows employees to view their own salary, managers to view office salaries,
-    accountants to view all salaries, and admins to view all salaries.
+    Admins, HR, and accountants can read non-admin salary records. Managers can
+    read non-admin salary records for their office. Employees can read their own
+    non-admin salary records. Salary writes are admin-only.
     """
     
     def has_permission(self, request, view):
-        return (
-            request.user and 
-            request.user.is_authenticated and 
-            request.user.role in ['admin', 'manager', 'employee', 'accountant']
-        )
+        user = request.user
+        if not user or not user.is_authenticated:
+            return False
+        if request.method in permissions.SAFE_METHODS:
+            return user.is_superuser or user.role in ['admin', 'manager', 'employee', 'hr', 'accountant']
+        return user.role == 'admin' or user.is_superuser
     
     def has_object_permission(self, request, view, obj):
         user = request.user
         
-        # Admin can access all salaries
-        if user.role == 'admin':
-            return True
-            
-        # Accountant can access all salaries
-        if user.role == 'accountant':
-            return True
-        
-        # Manager can access salaries for their office
-        if user.role == 'manager':
-            if hasattr(obj, 'employee') and obj.employee:
-                return obj.employee.office == user.office
-        
-        # Employee can only access their own salary
-        if user.role == 'employee':
-            if hasattr(obj, 'employee') and obj.employee:
-                return obj.employee == user
-            elif hasattr(obj, 'id'):
-                return obj.id == user.id
+        if request.method not in permissions.SAFE_METHODS:
+            return False
+
+        if hasattr(obj, 'employee') and obj.employee:
+            if obj.employee.role == 'admin':
+                return False
+            if user.role == 'admin' or user.is_superuser:
+                return True
+            if user.role in ['hr', 'accountant']:
+                return True
+            if user.role == 'manager':
+                return bool(user.office_id and obj.employee.office_id == user.office_id)
+            return obj.employee == user
+        if hasattr(obj, 'id'):
+            return obj.id == user.id
         
         return False
 

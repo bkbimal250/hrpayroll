@@ -3,11 +3,11 @@ Salary Management Views
 Comprehensive salary management system with auto-calculation from attendance
 """
 
-from django.db.models import Q
 from rest_framework import status, generics, permissions, filters
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from rest_framework.exceptions import PermissionDenied
 from django.db.models import Sum, Count, Avg, Max, Min
 from django.utils import timezone
 from django.core.exceptions import ValidationError
@@ -25,15 +25,23 @@ from .serializers import (
     SalaryTemplateCreateSerializer, SalaryBulkCreateSerializer, SalaryReportSerializer,
     SalarySummarySerializer, SalaryAutoCalculateSerializer
 )
-from .permissions import IsAdminOrManager, IsAdminOrManagerOrAccountant, IsAdminOrManagerOrEmployee, IsEmployeeSalaryAccess
+from .permissions import IsEmployeeSalaryAccess
 from .tasks import salary_bulk_create_task
+
+
+class IsSalaryAdmin(permissions.BasePermission):
+    """Allow only superusers or users with the app admin role to manage payroll-wide salary data."""
+
+    def has_permission(self, request, view):
+        user = request.user
+        return bool(user and user.is_authenticated and (user.is_superuser or user.role == 'admin'))
 
 
 class SalaryListView(generics.ListCreateAPIView):
     """
     List all salaries or create a new salary
-    - GET: List salaries with filtering (Admin/Manager/Accountant can view all, Employee can view their own)
-    - POST: Create new salary (Admin/Manager/Accountant only)
+    - GET: Admin can view all; other users can view their own only
+    - POST: Create new salary (Admin only)
     """
     serializer_class = SalarySerializer
     permission_classes = [permissions.IsAuthenticated, IsEmployeeSalaryAccess]
@@ -66,19 +74,14 @@ class SalaryListView(generics.ListCreateAPIView):
         ).all()
 
         # Role-based filtering
-        if user.role in ['admin', 'accountant']:
-            # Admin and Accountant can see all salaries
-            pass
-        elif user.role == 'manager':
-            # Manager can see salaries of employees in their office OR their own salary
-            if user.office:
-                queryset = queryset.filter(Q(employee__office=user.office) | Q(employee=user))
-            else:
-                # Manager without office can only see their own salary
-                queryset = queryset.filter(employee=user)
-        elif user.role == 'employee':
-            # Employee can only see their own salaries
-            queryset = queryset.filter(employee=user)
+        if user.role == 'admin' or user.is_superuser:
+            queryset = queryset.exclude(employee__role='admin')
+        elif user.role in ['hr', 'accountant']:
+            queryset = queryset.exclude(employee__role='admin')
+        elif user.role == 'manager' and user.office_id:
+            queryset = queryset.filter(employee__office_id=user.office_id).exclude(employee__role='admin')
+        else:
+            queryset = queryset.filter(employee=user).exclude(employee__role='admin')
 
         # Additional filters
         employee_id = self.request.query_params.get('employee_id') or self.request.query_params.get('employee')
@@ -159,18 +162,18 @@ class SalaryListView(generics.ListCreateAPIView):
         return response
 
     def perform_create(self, serializer):
-        """Create salary with current user as creator (Admin/Manager/Accountant only)"""
-        if self.request.user.role not in ['admin', 'manager', 'accountant']:
-            raise PermissionError("Only admin, manager, or accountant can create salary records")
+        """Create salary with current user as creator (Admin only)"""
+        if self.request.user.role != 'admin' and not self.request.user.is_superuser:
+            raise PermissionDenied("Only admin can create salary records")
         serializer.save(created_by=self.request.user)
 
 
 class SalaryDetailView(generics.RetrieveUpdateDestroyAPIView):
     """
     Retrieve, update or delete a salary
-    - GET: Get salary details (Admin/Manager/Accountant can view all, Employee can view their own)
-    - PUT/PATCH: Update salary (Admin/Manager/Accountant only)
-    - DELETE: Delete salary (Admin/Manager/Accountant only)
+    - GET: Admin can view all; other users can view their own only
+    - PUT/PATCH: Update salary (Admin only)
+    - DELETE: Delete salary (Admin only)
     """
     serializer_class = SalarySerializer
     permission_classes = [permissions.IsAuthenticated, IsEmployeeSalaryAccess]
@@ -184,19 +187,14 @@ class SalaryDetailView(generics.RetrieveUpdateDestroyAPIView):
         ).all()
 
         # Role-based filtering
-        if user.role == 'admin':
-            # Admin can see all salaries
-            pass
-        elif user.role == 'manager':
-            # Manager can see salaries of employees in their office
-            if user.office:
-                queryset = queryset.filter(employee__office=user.office)
-        elif user.role == 'accountant':
-            # Accountant can see all salaries
-            pass
-        elif user.role == 'employee':
-            # Employee can only see their own salaries
-            queryset = queryset.filter(employee=user)
+        if user.role == 'admin' or user.is_superuser:
+            queryset = queryset.exclude(employee__role='admin')
+        elif user.role in ['hr', 'accountant']:
+            queryset = queryset.exclude(employee__role='admin')
+        elif user.role == 'manager' and user.office_id:
+            queryset = queryset.filter(employee__office_id=user.office_id).exclude(employee__role='admin')
+        else:
+            queryset = queryset.filter(employee=user).exclude(employee__role='admin')
 
         return queryset
 
@@ -209,50 +207,37 @@ class SalaryDetailView(generics.RetrieveUpdateDestroyAPIView):
         return SalarySerializer
 
     def update(self, request, *args, **kwargs):
-        """Update salary (Admin/Manager/Accountant only)"""
-        if request.user.role not in ['admin', 'manager', 'accountant']:
+        """Update salary (Admin only)"""
+        if request.user.role != 'admin' and not request.user.is_superuser:
             return Response(
-                {'error': 'Only admin, manager, or accountant can update salary records'}, 
+                {'error': 'Only admin can update salary records'},
                 status=status.HTTP_403_FORBIDDEN
             )
         return super().update(request, *args, **kwargs)
 
     def destroy(self, request, *args, **kwargs):
-        """Delete salary (Admin/Manager/Accountant only)"""
-        if request.user.role not in ['admin', 'manager', 'accountant']:
+        """Delete salary (Admin only)"""
+        if request.user.role != 'admin' and not request.user.is_superuser:
             return Response(
-                {'error': 'Only admin, manager, or accountant can delete salary records'}, 
+                {'error': 'Only admin can delete salary records'},
                 status=status.HTTP_403_FORBIDDEN
             )
-        
-        # For managers, ensure they can only delete salaries from their office
-        if request.user.role == 'manager':
-            salary = self.get_object()
-            if not request.user.office or salary.employee.office != request.user.office:
-                return Response(
-                    {'error': 'Manager can only delete salaries from their own office'}, 
-                    status=status.HTTP_403_FORBIDDEN
-                )
-        
+
         return super().destroy(request, *args, **kwargs)
 
 
 class SalaryApprovalView(generics.UpdateAPIView):
     """
     Approve or reject salary
-    - PUT/PATCH: Approve/reject salary (Admin/Manager only)
+    - PUT/PATCH: Approve/reject salary (Admin only)
     """
     serializer_class = SalaryApprovalSerializer
-    permission_classes = [permissions.IsAuthenticated, IsAdminOrManagerOrAccountant]
+    permission_classes = [permissions.IsAuthenticated, IsSalaryAdmin]
 
     def get_queryset(self):
         """Filter salaries for approval"""
         user = self.request.user
         queryset = Salary.objects.select_related('employee', 'employee__office').all()
-
-        if user.role == 'manager' and user.office:
-            # Manager can only approve salaries of employees in their office
-            queryset = queryset.filter(employee__office=user.office)
 
         return queryset
 
@@ -261,10 +246,9 @@ class SalaryApprovalView(generics.UpdateAPIView):
         salary = self.get_object()
         status = serializer.validated_data.get('status')
 
-        # Check permissions - admin, manager, and accountant can change status
-        if self.request.user.role not in ['admin', 'manager', 'accountant']:
-            from rest_framework.exceptions import PermissionDenied
-            raise PermissionDenied('Only admin, manager, and accountant can change salary status.')
+        # Check permissions - admin only
+        if self.request.user.role != 'admin' and not self.request.user.is_superuser:
+            raise PermissionDenied('Only admin can change salary status.')
 
         # Update status (pending, paid, or hold)
         salary.status = status
@@ -281,20 +265,16 @@ class SalaryApprovalView(generics.UpdateAPIView):
 class SalaryPaymentView(generics.UpdateAPIView):
     """
     Mark salary as paid
-    - PUT/PATCH: Mark salary as paid (Admin/Manager/Accountant only)
+    - PUT/PATCH: Mark salary as paid (Admin only)
     """
     serializer_class = SalaryPaymentSerializer
-    permission_classes = [permissions.IsAuthenticated, IsAdminOrManagerOrAccountant]
+    permission_classes = [permissions.IsAuthenticated, IsSalaryAdmin]
 
     def get_queryset(self):
         """Filter salaries for payment"""
         user = self.request.user
         # Allow payment for approved salaries, but also allow direct status changes
         queryset = Salary.objects.all()
-
-        if user.role == 'manager' and user.office:
-            # Manager can only mark salaries as paid for employees in their office
-            queryset = queryset.filter(employee__office=user.office)
 
         return queryset
 
@@ -319,9 +299,9 @@ class SalaryPaymentView(generics.UpdateAPIView):
 class SalaryBulkCreateView(APIView):
     """
     Bulk create salaries for multiple employees
-    - POST: Create salaries for multiple employees (Admin/Manager/Accountant only)
+    - POST: Create salaries for multiple employees (Admin only)
     """
-    permission_classes = [permissions.IsAuthenticated, IsAdminOrManagerOrAccountant]
+    permission_classes = [permissions.IsAuthenticated, IsSalaryAdmin]
 
     def post(self, request):
         """Create salaries for multiple employees"""
@@ -358,9 +338,9 @@ class SalaryBulkCreateView(APIView):
 class SalaryAutoCalculateView(APIView):
     """
     Auto-calculate salaries from attendance data
-    - POST: Calculate salaries based on attendance (Admin/Manager/Accountant only)
+    - POST: Calculate salaries based on attendance (Admin only)
     """
-    permission_classes = [permissions.IsAuthenticated, IsAdminOrManagerOrAccountant]
+    permission_classes = [permissions.IsAuthenticated, IsSalaryAdmin]
 
     def post(self, request):
         """Auto-calculate salaries from attendance"""
@@ -445,10 +425,10 @@ class SalaryTemplateListView(generics.ListCreateAPIView):
     """
     List all salary templates or create a new template
     - GET: List templates with filtering
-    - POST: Create new template (Admin/Manager/Accountant only)
+    - POST: Create new template (Admin only)
     """
     serializer_class = SalaryTemplateSerializer
-    permission_classes = [permissions.IsAuthenticated, IsAdminOrManagerOrAccountant]
+    permission_classes = [permissions.IsAuthenticated, IsSalaryAdmin]
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
     search_fields = ['name', 'designation_name', 'office_name']
     ordering_fields = ['name', 'created_at', 'basic_pay', 'designation_name', 'office_name']
@@ -460,10 +440,6 @@ class SalaryTemplateListView(generics.ListCreateAPIView):
         queryset = SalaryTemplate.objects.select_related(
             'created_by'
         ).filter(is_active=True)
-
-        if user.role == 'manager' and user.office:
-            # Manager can only see templates for their office
-            queryset = queryset.filter(office_name=user.office.name)
 
         return queryset
 
@@ -482,11 +458,11 @@ class SalaryTemplateDetailView(generics.RetrieveUpdateDestroyAPIView):
     """
     Retrieve, update or delete a salary template
     - GET: Get template details
-    - PUT/PATCH: Update template (Admin/Manager/Accountant only)
+    - PUT/PATCH: Update template (Admin only)
     - DELETE: Delete template (Admin only)
     """
     serializer_class = SalaryTemplateSerializer
-    permission_classes = [permissions.IsAuthenticated, IsAdminOrManagerOrAccountant]
+    permission_classes = [permissions.IsAuthenticated, IsSalaryAdmin]
 
     def get_queryset(self):
         """Filter templates based on user role"""
@@ -495,19 +471,15 @@ class SalaryTemplateDetailView(generics.RetrieveUpdateDestroyAPIView):
             'designation', 'office', 'created_by'
         ).all()
 
-        if user.role == 'manager' and user.office:
-            # Manager can only see templates for their office
-            queryset = queryset.filter(office=user.office)
-
         return queryset
 
 
 class SalaryReportView(APIView):
     """
     Generate salary reports
-    - GET: Get salary report data (Admin/Manager/Accountant only)
+    - GET: Get salary report data (Admin only)
     """
-    permission_classes = [permissions.IsAuthenticated, IsAdminOrManagerOrAccountant]
+    permission_classes = [permissions.IsAuthenticated, IsSalaryAdmin]
 
     def get(self, request):
         """Generate salary report"""
@@ -637,9 +609,9 @@ class SalaryReportView(APIView):
 class SalarySummaryView(APIView):
     """
     Get salary summary statistics
-    - GET: Get salary summary (Admin/Manager/Accountant only)
+    - GET: Get salary summary (Admin only)
     """
-    permission_classes = [permissions.IsAuthenticated, IsAdminOrManagerOrAccountant]
+    permission_classes = [permissions.IsAuthenticated, IsSalaryAdmin]
 
     def get(self, request):
         """Get salary summary statistics"""
@@ -776,21 +748,12 @@ def employee_salary_history(request, employee_id):
         # Check permissions
         user = request.user
         
-        # Employee can only view their own salary history
-        if user.role == 'employee' and employee.id != user.id:
+        # Admin can view any employee salary history. Everyone else can only view their own.
+        if not (user.role == 'admin' or user.is_superuser) and employee.id != user.id:
             return Response(
                 {'error': 'You can only view your own salary history.'},
                 status=status.HTTP_403_FORBIDDEN
             )
-        
-        # Manager can only view employees in their office
-        if user.role == 'manager' and user.office and employee.office != user.office:
-            return Response(
-                {'error': 'You can only view salary history of employees in your office.'},
-                status=status.HTTP_403_FORBIDDEN
-            )
-        
-        # Admin and Accountant can view any employee's salary history
 
         # Get salary history
         salaries = Salary.objects.filter(employee=employee).order_by('-salary_month')
@@ -829,25 +792,15 @@ def employee_salary_history(request, employee_id):
 
 
 @api_view(['POST'])
-@permission_classes([permissions.IsAuthenticated, IsAdminOrManagerOrAccountant])
+@permission_classes([permissions.IsAuthenticated, IsSalaryAdmin])
 def recalculate_salary(request, salary_id):
     """
     Recalculate salary based on attendance
-    - POST: Recalculate salary (Admin/Manager/Accountant only)
+    - POST: Recalculate salary (Admin only)
     """
     try:
         salary = Salary.objects.get(id=salary_id)
         
-        # Check permissions
-        user = request.user
-        if user.role == 'manager' and user.office and salary.employee.office != user.office:
-            return Response(
-                {'error': 'You can only recalculate salaries of employees in your office.'},
-                status=status.HTTP_403_FORBIDDEN
-            )
-        # Admin and Accountant can recalculate any salary
-        # Manager can recalculate salaries of employees in their office (checked above)
-
         # Recalculate worked days from attendance
         salary.calculate_worked_days_from_attendance()
         salary.save()
@@ -867,7 +820,7 @@ def recalculate_salary(request, salary_id):
 
 
 @api_view(['GET'])
-@permission_classes([permissions.IsAuthenticated, IsAdminOrManagerOrAccountant])
+@permission_classes([permissions.IsAuthenticated, IsSalaryAdmin])
 def salary_creation_status(request):
     """
     Get employees with their salary creation status for a specific month
@@ -1117,7 +1070,7 @@ def salary_creation_status(request):
 
 
 @api_view(['GET'])
-@permission_classes([permissions.IsAuthenticated, IsAdminOrManagerOrAccountant])
+@permission_classes([permissions.IsAuthenticated, IsSalaryAdmin])
 def salary_statistics(request):
     """
     Get detailed salary statistics
@@ -1130,12 +1083,6 @@ def salary_statistics(request):
     # Build queryset
     queryset = Salary.objects.filter(salary_month=current_month)
     
-    # Role-based filtering
-    user = request.user
-    if user.role == 'manager' and user.office:
-        queryset = queryset.filter(employee__office=user.office)
-    # Admin and Accountant can see all statistics
-
     # Calculate detailed statistics
     stats = {
         'by_status': {},
@@ -1182,10 +1129,6 @@ def salary_statistics(request):
     for i in range(6):
         month_date = current_month - timedelta(days=30 * i)
         month_salaries = Salary.objects.filter(salary_month=month_date)
-        
-        if user.role == 'manager' and user.office:
-            month_salaries = month_salaries.filter(employee__office=user.office)
-        # Admin and Accountant can see all monthly trends
         
         count = month_salaries.count()
         amount = month_salaries.aggregate(total=Sum('net_salary'))['total'] or 0

@@ -49,7 +49,10 @@ from .document_views import (
     DocumentGenerationViewSet,
 )
 from coreapp.views import (
-    SalaryIncrementViewSet, SalaryIncrementHistoryViewSet, HolidayViewSet
+    SalaryIncrementViewSet,
+    SalaryIncrementHistoryViewSet,
+    HolidayViewSet,
+    HappyBirthdayViewSet,
 )
 # ESSL views disabled - ZKTeco devices only
 # from .essl_views import (
@@ -95,6 +98,7 @@ router.register(
     basename='salary-increment-history',
 )
 router.register(r'holidays', HolidayViewSet, basename='holiday')
+router.register(r'birthdays', HappyBirthdayViewSet, basename='birthday')
 
 # ESSL Device Management - DISABLED (ZKTeco devices only)
 # router.register(r'essl-devices', ESSLDeviceViewSet, basename='essl-device')

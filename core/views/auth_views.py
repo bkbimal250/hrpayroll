@@ -325,6 +325,7 @@ class CustomUserViewSet(viewsets.ModelViewSet):
                 'designation',
                 'designation__name',
                 'joining_date',
+                'salary',
                 'employment_status',
                 'exit_type',
                 'resignation_date',
@@ -378,6 +379,9 @@ class CustomUserViewSet(viewsets.ModelViewSet):
         data = request.data.copy()
         actor = request.user
 
+        if not (actor.is_superuser or actor.is_admin):
+            data.pop('salary', None)
+
         if actor.is_manager:
             if not actor.office_id:
                 raise DRFValidationError({'office': 'Managers must be assigned to an office before managing employees.'})
@@ -397,6 +401,15 @@ class CustomUserViewSet(viewsets.ModelViewSet):
         self.perform_create(serializer)
         headers = self.get_success_headers(serializer.data)
         return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
+
+    def update(self, request, *args, **kwargs):
+        partial = kwargs.pop('partial', False)
+        instance = self.get_object()
+        data = self._prepare_user_write_data(request, instance=instance)
+        serializer = self.get_serializer(instance, data=data, partial=partial)
+        serializer.is_valid(raise_exception=True)
+        self.perform_update(serializer)
+        return Response(serializer.data)
 
     @action(detail=True, methods=['get'])
     def financial_details(self, request, pk=None):

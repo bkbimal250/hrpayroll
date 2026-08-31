@@ -3,16 +3,24 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.decorators import action
 from rest_framework.response import Response
 
-from .models import SalaryIncrement, SalaryIncrementHistory, Holiday
+from core.models import CustomUser
+
+from .models import SalaryIncrement, SalaryIncrementHistory, Holiday, HappyBirthday
 from .serializers import (
     SalaryIncrementSerializer,
     SalaryIncrementHistorySerializer,
     HolidaySerializer,  
+    HappyBirthdaySerializer,
 )
 from .permissions import IsAdminManagerHRNoDeleteOrSuperuser, IsAdminManagerOrSuperuser
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework import filters
-from .filters import SalaryIncrementFilter, SalaryIncrementHistoryFilter, HolidayFilter
+from .filters import (
+    SalaryIncrementFilter,
+    SalaryIncrementHistoryFilter,
+    HolidayFilter,
+    HappyBirthdayFilter,
+)
 
 
 class SalaryIncrementViewSet(viewsets.ModelViewSet):
@@ -192,3 +200,62 @@ class HolidayViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         return super().get_queryset()
+
+
+class HappyBirthdayViewSet(viewsets.ReadOnlyModelViewSet):
+    """
+    Read-only birthday calendar for active employees currently working.
+
+    Birthday rows are synchronized from CustomUser.date_of_birth so the page
+    includes every active employee without requiring manual HappyBirthday rows.
+    """
+
+    serializer_class = HappyBirthdaySerializer
+    permission_classes = [IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filterset_class = HappyBirthdayFilter
+    search_fields = [
+        'employee__first_name',
+        'employee__last_name',
+        'employee__email',
+        'employee__employee_id',
+    ]
+    ordering_fields = ['birthday_date', 'employee__first_name', 'employee__last_name']
+
+    def _sync_active_employee_birthdays(self):
+        active_employees = CustomUser.objects.filter(
+            role='employee',
+            employment_status='active',
+            is_active=True,
+            date_of_birth__isnull=False,
+        ).only('id', 'date_of_birth')
+
+        for employee in active_employees:
+            birthdays = list(HappyBirthday.objects.filter(employee=employee).order_by('id'))
+            birthday = birthdays[0] if birthdays else None
+            duplicate_ids = [item.id for item in birthdays[1:]]
+            if duplicate_ids:
+                HappyBirthday.objects.filter(id__in=duplicate_ids).delete()
+
+            if birthday:
+                if birthday.birthday_date != employee.date_of_birth:
+                    birthday.birthday_date = employee.date_of_birth
+                    birthday.save(update_fields=['birthday_date', 'updated_at'])
+                continue
+            HappyBirthday.objects.create(employee=employee, birthday_date=employee.date_of_birth)
+
+    def get_queryset(self):
+        if self.action == 'list':
+            self._sync_active_employee_birthdays()
+
+        return HappyBirthday.objects.select_related(
+            'employee',
+            'employee__office',
+            'employee__department',
+            'employee__designation',
+        ).filter(
+            employee__role='employee',
+            employee__employment_status='active',
+            employee__is_active=True,
+            birthday_date__isnull=False,
+        )

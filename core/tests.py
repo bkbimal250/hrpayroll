@@ -10,7 +10,7 @@ from django.utils import timezone
 from rest_framework.test import APIClient
 
 from .birthday_notifications import birthday_observed_date, process_daily_employee_birthdays
-from .models import BirthdayNotificationLog, CustomUser, Notification, Resignation
+from .models import BirthdayNotificationLog, CustomUser, Notification, Resignation, Salary
 
 
 class ResignationSubmissionTests(TestCase):
@@ -137,15 +137,22 @@ class BirthdayNotificationTests(TestCase):
             **kwargs,
         )
 
-    def test_employee_birthday_tomorrow_sends_management_reminders(self):
+    def test_employee_birthday_tomorrow_sends_admin_hr_and_employee_reminders(self):
         employee = self.create_employee('EMP001', timezone.datetime(1990, 7, 18).date())
 
         summary = process_daily_employee_birthdays(for_date=timezone.datetime(2026, 7, 17).date())
 
         self.assertEqual(summary['tomorrow_birthdays_found'], 1)
         self.assertEqual(Notification.objects.filter(user=self.admin, title__icontains='Upcoming').count(), 1)
+        self.assertEqual(Notification.objects.filter(user=self.hr, title__icontains='Upcoming').count(), 1)
+        self.assertEqual(Notification.objects.filter(user=self.other_employee, title__icontains='Upcoming').count(), 1)
         self.assertEqual(Notification.objects.filter(user=employee).count(), 0)
-        self.assertGreaterEqual(len(mail.outbox), 3)
+        self.assertEqual(Notification.objects.filter(user=self.accountant).count(), 0)
+        self.assertEqual({message.to[0] for message in mail.outbox}, {
+            self.admin.email,
+            self.hr.email,
+            self.other_employee.email,
+        })
 
     def test_employee_birthday_today_sends_wish_and_management_reminders(self):
         employee = self.create_employee('EMP002', timezone.datetime(1990, 7, 17).date())
@@ -155,7 +162,16 @@ class BirthdayNotificationTests(TestCase):
         self.assertEqual(summary['today_birthdays_found'], 1)
         self.assertEqual(Notification.objects.filter(user=employee, title__icontains='Happy Birthday').count(), 1)
         self.assertEqual(Notification.objects.filter(user=self.hr, title__icontains='Employee Birthday Today').count(), 1)
-        self.assertGreaterEqual(len(mail.outbox), 4)
+        self.assertEqual(Notification.objects.filter(user=self.other_employee, title__icontains='Employee Birthday Today').count(), 1)
+        self.assertEqual(Notification.objects.filter(user=self.accountant).count(), 0)
+        self.assertEqual({message.to[0] for message in mail.outbox}, {
+            employee.email,
+            self.admin.email,
+            self.hr.email,
+            self.other_employee.email,
+        })
+        employee_message = next(message for message in mail.outbox if message.to == [employee.email])
+        self.assertIn('Happy Birthday', employee_message.subject)
 
     def test_employee_birthday_on_another_date_is_ignored(self):
         self.create_employee('EMP003', timezone.datetime(1990, 7, 19).date())
@@ -207,12 +223,25 @@ class BirthdayNotificationTests(TestCase):
         self.assertEqual(Notification.objects.count(), first_notification_count)
         self.assertEqual(BirthdayNotificationLog.objects.count(), first_log_count)
 
-    def test_unauthorized_employee_role_does_not_receive_management_reminder(self):
+    def test_accountant_role_does_not_receive_birthday_reminder(self):
         self.create_employee('EMP009', timezone.datetime(1990, 7, 18).date())
 
         process_daily_employee_birthdays(for_date=timezone.datetime(2026, 7, 17).date())
 
-        self.assertEqual(Notification.objects.filter(user=self.other_employee).count(), 0)
+        self.assertEqual(Notification.objects.filter(user=self.accountant).count(), 0)
+        self.assertNotIn(self.accountant.email, {message.to[0] for message in mail.outbox})
+
+    def test_notice_period_birthday_employee_is_ignored(self):
+        self.create_employee(
+            'EMP011',
+            timezone.datetime(1990, 7, 17).date(),
+            employment_status='notice_period',
+        )
+
+        summary = process_daily_employee_birthdays(for_date=timezone.datetime(2026, 7, 17).date())
+
+        self.assertEqual(summary['today_birthdays_found'], 0)
+        self.assertEqual(Notification.objects.filter(notification_type='reminder').count(), 0)
 
     def test_dry_run_command_performs_no_writes(self):
         self.create_employee('EMP010', timezone.datetime(1990, 7, 17).date())
@@ -223,3 +252,84 @@ class BirthdayNotificationTests(TestCase):
         self.assertIn('today_birthdays_found: 1', output.getvalue())
         self.assertEqual(Notification.objects.filter(notification_type='reminder').count(), 0)
         self.assertEqual(BirthdayNotificationLog.objects.count(), 0)
+
+
+class SalaryVisibilityTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.admin = CustomUser.objects.create_user(
+            username='salary-admin@example.com',
+            email='salary-admin@example.com',
+            password='test-pass-123',
+            role='admin',
+            employee_id='ADM-SAL',
+        )
+        self.hr = CustomUser.objects.create_user(
+            username='salary-hr@example.com',
+            email='salary-hr@example.com',
+            password='test-pass-123',
+            role='hr',
+            employee_id='HR-SAL',
+        )
+        self.employee = CustomUser.objects.create_user(
+            username='salary-employee@example.com',
+            email='salary-employee@example.com',
+            password='test-pass-123',
+            role='employee',
+            employee_id='EMP-SAL',
+        )
+        self.manager = CustomUser.objects.create_user(
+            username='salary-manager@example.com',
+            email='salary-manager@example.com',
+            password='test-pass-123',
+            role='manager',
+            employee_id='MGR-SAL',
+        )
+        self.salary_month = timezone.datetime(2026, 7, 1).date()
+        self.hr_salary = self.create_salary(self.hr)
+        self.employee_salary = self.create_salary(self.employee)
+        self.manager_salary = self.create_salary(self.manager)
+        self.admin_salary = self.create_salary(self.admin)
+
+    def create_salary(self, employee):
+        return Salary.objects.create(
+            employee=employee,
+            basic_pay=30000,
+            per_day_pay=1000,
+            total_days=30,
+            worked_days=30,
+            salary_month=self.salary_month,
+            status='paid',
+            created_by=self.admin,
+        )
+
+    def response_results(self, response):
+        payload = response.json()
+        return payload.get('results', payload)
+
+    def test_hr_can_view_all_non_admin_salary_records(self):
+        self.client.force_authenticate(user=self.hr)
+
+        response = self.client.get(reverse('core:salary-list'), {'year': 2026, 'month': 7})
+
+        self.assertEqual(response.status_code, 200)
+        salary_ids = {row['id'] for row in self.response_results(response)}
+        self.assertIn(str(self.hr_salary.id), salary_ids)
+        self.assertIn(str(self.employee_salary.id), salary_ids)
+        self.assertIn(str(self.manager_salary.id), salary_ids)
+        self.assertNotIn(str(self.admin_salary.id), salary_ids)
+
+    def test_hr_can_open_non_admin_salary_detail(self):
+        self.client.force_authenticate(user=self.hr)
+
+        response = self.client.get(reverse('core:salary-detail', args=[self.employee_salary.id]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()['id'], str(self.employee_salary.id))
+
+    def test_hr_cannot_open_admin_salary_detail(self):
+        self.client.force_authenticate(user=self.hr)
+
+        response = self.client.get(reverse('core:salary-detail', args=[self.admin_salary.id]))
+
+        self.assertEqual(response.status_code, 404)

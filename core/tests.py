@@ -291,15 +291,15 @@ class SalaryVisibilityTests(TestCase):
         self.manager_salary = self.create_salary(self.manager)
         self.admin_salary = self.create_salary(self.admin)
 
-    def create_salary(self, employee):
+    def create_salary(self, employee, status='paid', salary_month=None):
         return Salary.objects.create(
             employee=employee,
             basic_pay=30000,
             per_day_pay=1000,
             total_days=30,
             worked_days=30,
-            salary_month=self.salary_month,
-            status='paid',
+            salary_month=salary_month or self.salary_month,
+            status=status,
             created_by=self.admin,
         )
 
@@ -333,3 +333,37 @@ class SalaryVisibilityTests(TestCase):
         response = self.client.get(reverse('core:salary-detail', args=[self.admin_salary.id]))
 
         self.assertEqual(response.status_code, 404)
+
+    def test_admin_can_delete_pending_salary_record(self):
+        pending_salary = self.create_salary(
+            self.employee,
+            status='pending',
+            salary_month=self.salary_month + timedelta(days=31),
+        )
+        self.client.force_authenticate(user=self.admin)
+
+        response = self.client.delete(reverse('core:salary-detail', args=[pending_salary.id]))
+
+        self.assertEqual(response.status_code, 204)
+        self.assertFalse(Salary.objects.filter(id=pending_salary.id).exists())
+
+    def test_admin_cannot_delete_paid_salary_record(self):
+        self.client.force_authenticate(user=self.admin)
+
+        response = self.client.delete(reverse('core:salary-detail', args=[self.employee_salary.id]))
+
+        self.assertEqual(response.status_code, 400)
+        self.assertTrue(Salary.objects.filter(id=self.employee_salary.id).exists())
+
+    def test_hr_cannot_delete_pending_salary_record(self):
+        pending_salary = self.create_salary(
+            self.employee,
+            status='pending',
+            salary_month=self.salary_month + timedelta(days=31),
+        )
+        self.client.force_authenticate(user=self.hr)
+
+        response = self.client.delete(reverse('core:salary-detail', args=[pending_salary.id]))
+
+        self.assertEqual(response.status_code, 403)
+        self.assertTrue(Salary.objects.filter(id=pending_salary.id).exists())

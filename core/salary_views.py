@@ -216,11 +216,18 @@ class SalaryDetailView(generics.RetrieveUpdateDestroyAPIView):
         return super().update(request, *args, **kwargs)
 
     def destroy(self, request, *args, **kwargs):
-        """Delete salary (Admin only)"""
+        """Delete pending salary records (Admin only)"""
         if request.user.role != 'admin' and not request.user.is_superuser:
             return Response(
                 {'error': 'Only admin can delete salary records'},
                 status=status.HTTP_403_FORBIDDEN
+            )
+
+        salary = self.get_object()
+        if salary.status != 'pending':
+            return Response(
+                {'error': 'Only pending salary records can be deleted'},
+                status=status.HTTP_400_BAD_REQUEST
             )
 
         return super().destroy(request, *args, **kwargs)

@@ -188,14 +188,13 @@ class IsEmployeeSalaryAccess(permissions.BasePermission):
     def has_object_permission(self, request, view, obj):
         user = request.user
         
-        if request.method not in permissions.SAFE_METHODS:
-            return False
-
         if hasattr(obj, 'employee') and obj.employee:
             if obj.employee.role == 'admin':
                 return False
             if user.role == 'admin' or user.is_superuser:
                 return True
+            if request.method not in permissions.SAFE_METHODS:
+                return False
             if user.role in ['hr', 'accountant']:
                 return True
             if user.role == 'manager':

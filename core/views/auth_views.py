@@ -379,7 +379,7 @@ class CustomUserViewSet(viewsets.ModelViewSet):
         data = request.data.copy()
         actor = request.user
 
-        if not (actor.is_superuser or actor.is_admin):
+        if not (actor.is_superuser or actor.is_admin or actor.is_hr):
             data.pop('salary', None)
 
         if actor.is_manager:

@@ -209,6 +209,7 @@ class CustomUserSerializer(serializers.ModelSerializer):
         return bool(
             getattr(actor, 'is_superuser', False) or
             getattr(actor, 'is_admin', False) or
+            getattr(actor, 'is_hr', False) or
             obj.id == actor.id
         )
 
@@ -223,7 +224,11 @@ class CustomUserSerializer(serializers.ModelSerializer):
         request = self.context.get('request')
         actor = getattr(request, 'user', None)
         if 'salary' in attrs and actor and actor.is_authenticated:
-            if not (getattr(actor, 'is_superuser', False) or getattr(actor, 'is_admin', False)):
+            if not (
+                getattr(actor, 'is_superuser', False) or
+                getattr(actor, 'is_admin', False) or
+                getattr(actor, 'is_hr', False)
+            ):
                 attrs.pop('salary', None)
 
         # Ensure managers have an office assigned
@@ -376,6 +381,7 @@ class CustomUserListSerializer(serializers.ModelSerializer):
             actor and getattr(actor, 'is_authenticated', False) and (
                 getattr(actor, 'is_superuser', False) or
                 getattr(actor, 'is_admin', False) or
+                getattr(actor, 'is_hr', False) or
                 instance.id == actor.id
             )
         )
@@ -490,7 +496,9 @@ class HREmployeeDetailSerializer(CustomUserSerializer):
     def get_salary(self, obj):
         request = self.context.get('request')
         actor = getattr(request, 'user', None)
-        if actor and getattr(actor, 'is_authenticated', False) and obj.id == actor.id:
+        if actor and getattr(actor, 'is_authenticated', False) and (
+            getattr(actor, 'is_hr', False) or obj.id == actor.id
+        ):
             return str(obj.salary) if obj.salary is not None else None
         return None
 
@@ -699,7 +707,7 @@ class UserProfileSerializer(serializers.ModelSerializer):
         request = self.context.get('request')
         actor = getattr(request, 'user', None)
         if 'salary' in attrs and actor and actor.is_authenticated:
-            if not (actor.is_superuser or actor.is_admin):
+            if not (actor.is_superuser or actor.is_admin or actor.is_hr):
                 attrs.pop('salary', None)
         return attrs
     
@@ -753,6 +761,7 @@ class UserProfileSerializer(serializers.ModelSerializer):
         can_view_salary = bool(
             actor and actor.is_authenticated and (
                 actor.is_superuser or actor.is_admin or instance.id == actor.id
+                or actor.is_hr
             )
         )
         if not can_view_salary:

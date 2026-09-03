@@ -367,3 +367,56 @@ class SalaryVisibilityTests(TestCase):
 
         self.assertEqual(response.status_code, 403)
         self.assertTrue(Salary.objects.filter(id=pending_salary.id).exists())
+
+
+class HREmployeeSalaryFieldTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.hr = CustomUser.objects.create_user(
+            username='hr-employee-salary@example.com',
+            email='hr-employee-salary@example.com',
+            password='test-pass-123',
+            role='hr',
+            employee_id='HR-EMP-SAL',
+        )
+        self.employee = CustomUser.objects.create_user(
+            username='employee-salary-field@example.com',
+            email='employee-salary-field@example.com',
+            password='test-pass-123',
+            role='employee',
+            employee_id='EMP-SAL-FIELD',
+            salary=25000,
+        )
+
+    def test_hr_employee_list_includes_salary(self):
+        self.client.force_authenticate(user=self.hr)
+
+        response = self.client.get(reverse('core:user-list'))
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        rows = payload.get('results', payload)
+        row = next(item for item in rows if item['id'] == str(self.employee.id))
+        self.assertEqual(row['salary'], '25000.00')
+
+    def test_hr_employee_detail_includes_salary(self):
+        self.client.force_authenticate(user=self.hr)
+
+        response = self.client.get(reverse('core:user-detail', args=[self.employee.id]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()['salary'], '25000.00')
+
+    def test_hr_can_update_employee_salary(self):
+        self.client.force_authenticate(user=self.hr)
+
+        response = self.client.patch(
+            reverse('core:user-detail', args=[self.employee.id]),
+            {'salary': '31000.00'},
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.employee.refresh_from_db()
+        self.assertEqual(str(self.employee.salary), '31000.00')
+        self.assertEqual(response.json()['salary'], '31000.00')

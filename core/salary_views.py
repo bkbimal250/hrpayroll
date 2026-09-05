@@ -37,6 +37,14 @@ class IsSalaryAdmin(permissions.BasePermission):
         return bool(user and user.is_authenticated and (user.is_superuser or user.role == 'admin'))
 
 
+class IsSalaryStatusUpdater(permissions.BasePermission):
+    """Allow superusers, admins, and accountants to change salary payment status."""
+
+    def has_permission(self, request, view):
+        user = request.user
+        return bool(user and user.is_authenticated and (user.is_superuser or user.role in ['admin', 'accountant']))
+
+
 class SalaryListView(generics.ListCreateAPIView):
     """
     List all salaries or create a new salary
@@ -236,10 +244,10 @@ class SalaryDetailView(generics.RetrieveUpdateDestroyAPIView):
 class SalaryApprovalView(generics.UpdateAPIView):
     """
     Approve or reject salary
-    - PUT/PATCH: Approve/reject salary (Admin only)
+    - PUT/PATCH: Change salary payment status (Admin or accountant)
     """
     serializer_class = SalaryApprovalSerializer
-    permission_classes = [permissions.IsAuthenticated, IsSalaryAdmin]
+    permission_classes = [permissions.IsAuthenticated, IsSalaryStatusUpdater]
 
     def get_queryset(self):
         """Filter salaries for approval"""
@@ -253,9 +261,9 @@ class SalaryApprovalView(generics.UpdateAPIView):
         salary = self.get_object()
         status = serializer.validated_data.get('status')
 
-        # Check permissions - admin only
-        if self.request.user.role != 'admin' and not self.request.user.is_superuser:
-            raise PermissionDenied('Only admin can change salary status.')
+        # Check permissions - admin/accountant only
+        if self.request.user.role not in ['admin', 'accountant'] and not self.request.user.is_superuser:
+            raise PermissionDenied('Only admin or accountant can change salary status.')
 
         # Update status (pending, paid, or hold)
         salary.status = status

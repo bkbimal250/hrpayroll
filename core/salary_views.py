@@ -83,9 +83,10 @@ class SalaryListView(generics.ListCreateAPIView):
 
         # Role-based filtering
         if user.role == 'admin' or user.is_superuser:
-            queryset = queryset.exclude(employee__role='admin')
+            pass
         elif user.role in ['hr', 'accountant']:
-            queryset = queryset.exclude(employee__role='admin')
+            if user.role == 'hr':
+                queryset = queryset.exclude(employee__role='admin')
         elif user.role == 'manager' and user.office_id:
             queryset = queryset.filter(employee__office_id=user.office_id).exclude(employee__role='admin')
         else:
@@ -196,9 +197,10 @@ class SalaryDetailView(generics.RetrieveUpdateDestroyAPIView):
 
         # Role-based filtering
         if user.role == 'admin' or user.is_superuser:
-            queryset = queryset.exclude(employee__role='admin')
+            pass
         elif user.role in ['hr', 'accountant']:
-            queryset = queryset.exclude(employee__role='admin')
+            if user.role == 'hr':
+                queryset = queryset.exclude(employee__role='admin')
         elif user.role == 'manager' and user.office_id:
             queryset = queryset.filter(employee__office_id=user.office_id).exclude(employee__role='admin')
         else:

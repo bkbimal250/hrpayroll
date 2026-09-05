@@ -172,9 +172,9 @@ class IsEmployeeOrManagerOrAdmin(permissions.BasePermission):
 class IsEmployeeSalaryAccess(permissions.BasePermission):
     """
     Custom permission for salary-related views.
-    Admins, HR, and accountants can read non-admin salary records. Managers can
-    read non-admin salary records for their office. Employees can read their own
-    non-admin salary records. Salary writes are admin-only.
+    Admins, HR, and accountants can read all salary records. Managers can read
+    salary records for their office. Employees can read their own salary records.
+    Salary writes are admin-only.
     """
     
     def has_permission(self, request, view):
@@ -189,10 +189,10 @@ class IsEmployeeSalaryAccess(permissions.BasePermission):
         user = request.user
         
         if hasattr(obj, 'employee') and obj.employee:
-            if obj.employee.role == 'admin':
-                return False
             if user.role == 'admin' or user.is_superuser:
                 return True
+            if obj.employee.role == 'admin' and user.role != 'accountant':
+                return False
             if request.method not in permissions.SAFE_METHODS:
                 return False
             if user.role in ['hr', 'accountant']:

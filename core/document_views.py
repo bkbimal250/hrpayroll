@@ -1576,15 +1576,20 @@ class DocumentGenerationViewSet(viewsets.ViewSet):
                         except (ValueError, TypeError):
                             pass
 
-                    if display_absent_days is None:
+                    if display_absent_days == 0:
                         try:
                             total_days_value = int(total_days or 0)
                             present_days_value = int(present_days or 0)
-                            display_absent_days = max(0, total_days_value - present_days_value)
+                            if total_days_value > present_days_value:
+                                display_absent_days = total_days_value - present_days_value
                         except (ValueError, TypeError):
                             display_absent_days = 0
                 except Exception as e:
                     logger.warning(f"Unable to fetch attendance summary for salary slip {salary_record.id}: {e}")
+                    try:
+                        display_absent_days = max(0, int(total_days or 0) - int(present_days or worked_days or 0))
+                    except (ValueError, TypeError):
+                        display_absent_days = 0
                 
                 # Employee details from DB
                 employee_name = emp.get_full_name()

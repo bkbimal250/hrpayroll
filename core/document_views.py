@@ -718,7 +718,7 @@ class DocumentGenerationViewSet(viewsets.ViewSet):
                 'employee_name': employee.get_full_name(),
                 'employee_id': employee.employee_id if employee.employee_id else str(employee.id)[:8].upper(),
                 'position': data.get('position', ''),
-                'office_name': employee.office.name if employee.office else 'Disha Online Solutions',
+                'office_name': employee.office.name if employee.office else 'Disha Online Solution',
                 'start_date': start_date_formatted,
                 'salary': self.format_currency(data.get('starting_salary') or data.get('salary')),
                 'offer_date': start_date_formatted,

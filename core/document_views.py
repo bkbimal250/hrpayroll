@@ -17,25 +17,10 @@ from django.utils.dateparse import parse_date
 # Do not import at module level to avoid startup crashes if missing
 WEASYPRINT_AVAILABLE = None
 from io import BytesIO
-import ssl
+from pathlib import Path
+import mimetypes
+from django.contrib.staticfiles import finders
 import base64
-import requests
-import threading
-from concurrent.futures import ThreadPoolExecutor
-
-# Image cache to avoid repeated network requests
-IMAGE_CACHE = {}
-IMAGE_CACHE_LOCK = threading.Lock()
-
-# Fix for SSL certificate verification issues on Windows for WeasyPrint/Cloudinary
-try:
-    _create_unverified_https_context = ssl._create_unverified_context
-except AttributeError:
-    # Legacy Python that doesn't verify HTTPS certificates by default
-    pass
-else:
-    # Handle target environment that doesn't have proper certs
-    ssl._create_default_https_context = _create_unverified_https_context
 
 def check_weasyprint_availability():
     """Check if WeasyPrint is available and return status"""
@@ -255,7 +240,7 @@ class GeneratedDocumentViewSet(viewsets.ModelViewSet):
                 }, status=500)
         
         # If no valid PDF file, generate one on-demand (works on VPS hosting)
-        if WEASYPRINT_AVAILABLE:
+        if check_weasyprint_availability():
             try:
                 if WEASYPRINT_AVAILABLE is None:
                     check_weasyprint_availability()
@@ -272,328 +257,8 @@ class GeneratedDocumentViewSet(viewsets.ModelViewSet):
                 # Generate proper filename
                 filename = self.generate_document_filename(document)
                 
-                # Determine if we should use the content directly or wrap it in a generic skeleton
-                # Many professional templates already provide a full HTML skeleton
-                content_to_check = document.content.strip().lower()
-                if content_to_check.startswith('<!doctype html') or content_to_check.startswith('<html'):
-                    logger.info(f"Using document.content directly (full HTML detected) for document {document.id}")
-                    html_content = document.content
-                else:
-                    logger.info(f"Wrapping document.content in generic skeleton for document {document.id}")
-                    # Get company logo path and information
-                    logo_path = ""
-                    company_name = "Your Company Name"
-                    company_address = "Company Address, City, State, ZIP"
-                    
-                    try:
-                        import os
-                        from django.conf import settings
-                        
-                        # Try different logo locations
-                        logo_locations = [
-                            os.path.join(settings.MEDIA_ROOT, 'documents', 'companylogo.png'),
-                            os.path.join(settings.MEDIA_ROOT, 'companylogo.png'),
-                            os.path.join(settings.MEDIA_ROOT, 'logo.png'),
-                            os.path.join(settings.STATIC_ROOT, 'images', 'logo.png') if hasattr(settings, 'STATIC_ROOT') else None
-                        ]
-                        
-                        for logo_file in logo_locations:
-                            if logo_file and os.path.exists(logo_file):
-                                logo_path = f"file://{logo_file}"
-                                logger.info(f"Company logo found: {logo_path}")
-                                break
-                        
-                        if not logo_path:
-                            logger.warning("Company logo not found, using text header")
-                        
-                        # Get company information from settings or use defaults
-                        company_name = getattr(settings, 'COMPANY_NAME', 'Your Company Name')
-                        company_address = getattr(settings, 'COMPANY_ADDRESS', 'Company Address, City, State, ZIP')
-                        company_phone = getattr(settings, 'COMPANY_PHONE', '+1 (555) 123-4567')
-                        company_email = getattr(settings, 'COMPANY_EMAIL', 'conatact.dishaonliesolution@gmail.com')
-                        company_website = getattr(settings, 'COMPANY_WEBSITE', 'https://dishaonliesolution.in')
-                        
-                    except Exception as e:
-                        logger.warning(f"Could not load company information: {e}")
-                    
-                    # Get employee ID from user
-                    employee_id = document.user.employee_id if document.user.employee_id else str(document.user.id)[:8].upper()
-                    
-                    # Enhance the document content with professional, compact CSS for A4 printing
-                    html_content = f"""
-                    <!DOCTYPE html>
-                <html>
-                <head>
-                    <meta charset="utf-8">
-                    <title>{document.title}</title>
-                    <style>
-                        @page {{
-                            margin: 0.4in;
-                            size: A4;
-                        }}
-                        
-                        * {{
-                            box-sizing: border-box;
-                        }}
-                        
-                        body {{
-                            font-family: 'Arial', 'Helvetica', sans-serif;
-                            font-size: 10pt;
-                            line-height: 1.2;
-                            color: #000000;
-                            margin: 0;
-                            padding: 0;
-                            background: white;
-                        }}
-                        
-                        .document-container {{
-                            max-width: 100%;
-                            margin: 0 auto;
-                        }}
-                        
-                        .header {{
-                            text-align: center;
-                            margin-bottom: 15px;
-                            border-bottom: 1px solid #000;
-                            padding-bottom: 10px;
-                        }}
-                        
-                        .company-logo {{
-                            max-height: 50px;
-                            max-width: 150px;
-                            margin-bottom: 8px;
-                        }}
-                        
-                        .company-name {{
-                            font-size: 14pt;
-                            font-weight: bold;
-                            color: #000000;
-                            margin: 3px 0;
-                            text-transform: uppercase;
-                            letter-spacing: 1px;
-                        }}
-                        
-                        .company-address {{
-                            font-size: 8pt;
-                            color: #000000;
-                            margin: 2px 0;
-                            line-height: 1.1;
-                        }}
-                        
-                        .company-contact {{
-                            font-size: 7pt;
-                            color: #000000;
-                            margin: 2px 0;
-                        }}
-                        
-                        .document-title {{
-                            font-size: 12pt;
-                            font-weight: bold;
-                            color: #000000;
-                            text-align: center;
-                            margin: 8px 0 5px 0;
-                            text-transform: uppercase;
-                            letter-spacing: 1px;
-                        }}
-                        
-                        .employee-header {{
-                            display: flex;
-                            justify-content: space-between;
-                            margin: 5px 0;
-                            font-size: 9pt;
-                            border-bottom: 1px solid #000;
-                            padding-bottom: 8px;
-                        }}
-                        
-                        .employee-id {{
-                            font-weight: bold;
-                            color: #000000;
-                        }}
-                        
-                        .document-date {{
-                            color: #000000;
-                        }}
-                        
-                        h1, h2, h3, h4, h5, h6 {{
-                            color: #000000;
-                            margin-top: 10px;
-                            margin-bottom: 5px;
-                            page-break-after: avoid;
-                        }}
-                        
-                        h1 {{
-                            font-size: 12pt;
-                            font-weight: bold;
-                        }}
-                        
-                        h2 {{
-                            font-size: 11pt;
-                            font-weight: bold;
-                        }}
-                        
-                        h3 {{
-                            font-size: 10pt;
-                            font-weight: bold;
-                        }}
-                        
-                        p {{
-                            margin: 4px 0;
-                            text-align: justify;
-                            font-size: 9pt;
-                            line-height: 1.2;
-                        }}
-                        
-                        .content {{
-                            margin: 10px 0;
-                        }}
-                        
-                        .footer {{
-                            margin-top: 20px;
-                            padding-top: 8px;
-                            border-top: 1px solid #000;
-                            font-size: 7pt;
-                            color: #000000;
-                            text-align: center;
-                        }}
-                        
-                        table {{
-                            width: 100%;
-                            border-collapse: collapse;
-                            margin: 8px 0;
-                            font-size: 9pt;
-                            border: 1px solid #000;
-                        }}
-                        
-                        th, td {{
-                            border: 1px solid #000;
-                            padding: 4px 6px;
-                            text-align: left;
-                            vertical-align: top;
-                        }}
-                        
-                        th {{
-                            background-color: #f0f0f0;
-                            font-weight: bold;
-                            font-size: 9pt;
-                            color: #000000;
-                        }}
-                        
-                        .salary-table {{
-                            margin: 5px 0;
-                        }}
-                        
-                        .salary-table th {{
-                            background-color: #e0e0e0;
-                            text-align: center;
-                            font-weight: bold;
-                        }}
-                        
-                        .salary-table td {{
-                            text-align: right;
-                        }}
-                        
-                        .salary-table .label {{
-                            text-align: left;
-                            font-weight: bold;
-                        }}
-                        
-                        .signature-section {{
-                            margin-top: 20px;
-                            page-break-inside: avoid;
-                        }}
-                        
-                        .signature-line {{
-                            border-bottom: 1px solid #000;
-                            width: 150px;
-                            margin: 10px 0 3px 0;
-                        }}
-                        
-                        .employee-info {{
-                            display: flex;
-                            justify-content: space-between;
-                            margin: 8px 0;
-                            font-size: 9pt;
-                        }}
-                        
-                        .employee-info div {{
-                            flex: 1;
-                            margin: 0 5px;
-                        }}
-                        
-                        .date-info {{
-                            text-align: right;
-                            font-size: 8pt;
-                            color: #000000;
-                            margin: 5px 0;
-                        }}
-                        
-                        /* Compact spacing for A4 */
-                        .compact {{
-                            margin: 3px 0;
-                        }}
-                        
-                        .compact p {{
-                            margin: 2px 0;
-                        }}
-                        
-                        .text-center {{
-                            text-align: center;
-                        }}
-                        
-                        .text-right {{
-                            text-align: right;
-                        }}
-                        
-                        .text-bold {{
-                            font-weight: bold;
-                        }}
-                        
-                        .mt-10 {{
-                            margin-top: 10px;
-                        }}
-                        
-                        .mb-5 {{
-                            margin-bottom: 5px;
-                        }}
-                        
-                        @media print {{
-                            body {{ margin: 0; }}
-                            .no-print {{ display: none; }}
-                            @page {{ margin: 0.4in; }}
-                        }}
-                    </style>
-                </head>
-                <body>
-                    <div class="document-container">
-                        <div class="header">
-                            {f'<img src="{logo_path}" alt="Company Logo" class="company-logo">' if logo_path else ''}
-                            <div class="company-name">{company_name}</div>
-                            <div class="company-address">{company_address}</div>
-                            <div class="company-contact">
-                                Phone: {company_phone} | Email: {company_email} | Website: {company_website}
-                            </div>
-                        </div>
-                        
-                        <div class="document-title">{document.title}</div>
-                        
-                        <div class="employee-header">
-                            <div class="employee-id">Employee ID: {employee_id}</div>
-                            <div class="document-date">Date: {document.generated_at.strftime('%B %d, %Y') if hasattr(document, 'generated_at') and document.generated_at else 'N/A'}</div>
-                        </div>
-                        
-                        <div class="content compact">
-                            {document.content}
-                        </div>
-                        
-                        <div class="footer">
-                            <p>This document was generated on {document.generated_at.strftime('%B %d, %Y at %I:%M %p') if hasattr(document, 'generated_at') and document.generated_at else 'N/A'}</p>
-                            <p>Employee Management System</p>
-                        </div>
-                    </div>
-                </body>
-                </html>
-                """
-                
+                html_content = self.generate_html_content_for_document(document)
+
                 # Use WeasyPrint to generate PDF with high quality settings
                 pdf_buffer = BytesIO()
                 
@@ -673,329 +338,19 @@ class GeneratedDocumentViewSet(viewsets.ModelViewSet):
     
 
     def generate_html_content_for_document(self, document):
-        """Generate HTML content for document download when PDF is not available"""
-        try:
-            # Get company logo path and information
-            logo_path = ""
-            company_name = "Your Company Name"
-            company_address = "Company Address"
-            company_phone = "+1 (555) 123-4567"
-            company_email = "info@company.com"
-            company_website = "www.company.com"
-            
-            try:
-                from django.conf import settings
-                logo_path = self.get_logo_url()
-                
-                # Get company information from settings or use defaults
-                company_name = getattr(settings, 'COMPANY_NAME', 'DISHA ONLINE SOLUTIONS')
-                company_address = getattr(settings, 'COMPANY_ADDRESS', 'Bhumiraj Costarica, 9th Floor Office No- 907, Plot No- 1 & 2, Sector 18, Sanpada, Navi Mumbai, Maharashtra 400705')
-                company_phone = getattr(settings, 'COMPANY_PHONE', '+91 1234567890')
-                company_email = getattr(settings, 'COMPANY_EMAIL', 'info@dosapi.attendance.dishaonliesolution.workspa.in')
-                company_website = getattr(settings, 'COMPANY_WEBSITE', 'https://dosapi.attendance.dishaonliesolution.workspa.in')
-                
-            except Exception as e:
-                logger.warning(f"Could not load company information: {e}")
-            
-            # Get employee ID from user
-            employee_id = document.employee.employee_id if document.employee.employee_id else str(document.employee.id)[:8].upper()
-            
-            # Generate filename based on document type
-            filename = self.generate_document_filename(document)
-            
-            # Enhance the document content with proper CSS for single-page layout
-            html_content = f"""
-            <!DOCTYPE html>
-            <html>
-            <head>
-                <meta charset="utf-8">
-                <title>{document.title}</title>
-                <style>
-                    @page {{
-                        margin: 0.4in;
-                        size: A4;
-                    }}
-                    
-                    * {{
-                        box-sizing: border-box;
-                    }}
-                    
-                    body {{
-                        font-family: 'Arial', 'Helvetica', sans-serif;
-                        font-size: 10pt;
-                        line-height: 1.2;
-                        color: #000000;
-                        margin: 0;
-                        padding: 0;
-                        background: white;
-                    }}
-                    
-                    .document-container {{
-                        max-width: 100%;
-                        margin: 0 auto;
-                    }}
-                    
-                    .header {{
-                        text-align: center;
-                        margin-bottom: 15px;
-                        border-bottom: 1px solid #000;
-                        padding-bottom: 10px;
-                    }}
-                    
-                    .company-logo {{
-                        max-height: 50px;
-                        max-width: 150px;
-                        margin-bottom: 8px;
-                    }}
-                    
-                    .company-name {{
-                        font-size: 14pt;
-                        font-weight: bold;
-                        color: #000000;
-                        margin: 3px 0;
-                        text-transform: uppercase;
-                        letter-spacing: 1px;
-                    }}
-                    
-                    .company-address {{
-                        font-size: 8pt;
-                        color: #000000;
-                        margin: 2px 0;
-                        line-height: 1.1;
-                    }}
-                    
-                    .company-contact {{
-                        font-size: 7pt;
-                        color: #000000;
-                        margin: 2px 0;
-                    }}
-                    
-                    .document-title {{
-                        font-size: 12pt;
-                        font-weight: bold;
-                        color: #000000;
-                        text-align: center;
-                        margin: 15px 0 10px 0;
-                        text-transform: uppercase;
-                        letter-spacing: 1px;
-                    }}
-                    
-                    .employee-header {{
-                        display: flex;
-                        justify-content: space-between;
-                        margin: 10px 0;
-                        font-size: 9pt;
-                        border-bottom: 1px solid #000;
-                        padding-bottom: 8px;
-                    }}
-                    
-                    .employee-id {{
-                        font-weight: bold;
-                        color: #000000;
-                    }}
-                    
-                    .document-date {{
-                        color: #000000;
-                    }}
-                    
-                    h1, h2, h3, h4, h5, h6 {{
-                        color: #000000;
-                        margin-top: 10px;
-                        margin-bottom: 5px;
-                        page-break-after: avoid;
-                    }}
-                    
-                    h1 {{
-                        font-size: 12pt;
-                        font-weight: bold;
-                    }}
-                    
-                    h2 {{
-                        font-size: 11pt;
-                        font-weight: bold;
-                    }}
-                    
-                    h3 {{
-                        font-size: 10pt;
-                        font-weight: bold;
-                    }}
-                    
-                    p {{
-                        margin: 4px 0;
-                        text-align: justify;
-                        font-size: 9pt;
-                        line-height: 1.2;
-                    }}
-                    
-                    .content {{
-                        margin: 10px 0;
-                    }}
-                    
-                    .footer {{
-                        margin-top: 20px;
-                        padding-top: 8px;
-                        border-top: 1px solid #000;
-                        font-size: 7pt;
-                        color: #000000;
-                        text-align: center;
-                    }}
-                    
-                    table {{
-                        width: 100%;
-                        border-collapse: collapse;
-                        margin: 8px 0;
-                        font-size: 9pt;
-                        border: 1px solid #000;
-                    }}
-                    
-                    th, td {{
-                        border: 1px solid #000;
-                        padding: 4px 6px;
-                        text-align: left;
-                        vertical-align: top;
-                    }}
-                    
-                    th {{
-                        background-color: #f0f0f0;
-                        font-weight: bold;
-                        font-size: 9pt;
-                        color: #000000;
-                    }}
-                    
-                    .salary-table {{
-                        margin: 10px 0;
-                    }}
-                    
-                    .salary-table th {{
-                        background-color: #e0e0e0;
-                        text-align: center;
-                        font-weight: bold;
-                    }}
-                    
-                    .salary-table td {{
-                        text-align: right;
-                    }}
-                    
-                    .salary-table .label {{
-                        text-align: left;
-                        font-weight: bold;
-                    }}
-                    
-                    .signature-section {{
-                        margin-top: 20px;
-                        page-break-inside: avoid;
-                    }}
-                    
-                    .signature-line {{
-                        border-bottom: 1px solid #000;
-                        width: 150px;
-                        margin: 10px 0 3px 0;
-                    }}
-                    
-                    .employee-info {{
-                        display: flex;
-                        justify-content: space-between;
-                        margin: 8px 0;
-                        font-size: 9pt;
-                    }}
-                    
-                    .employee-info div {{
-                        flex: 1;
-                        margin: 0 5px;
-                    }}
-                    
-                    .date-info {{
-                        text-align: right;
-                        font-size: 8pt;
-                        color: #000000;
-                        margin: 5px 0;
-                    }}
-                    
-                    /* Compact spacing for A4 */
-                    .compact {{
-                        margin: 3px 0;
-                    }}
-                    
-                    .compact p {{
-                        margin: 2px 0;
-                    }}
-                    
-                    .text-center {{
-                        text-align: center;
-                    }}
-                    
-                    .text-right {{
-                        text-align: right;
-                    }}
-                    
-                    .text-bold {{
-                        font-weight: bold;
-                    }}
-                    
-                    .mt-10 {{
-                        margin-top: 10px;
-                    }}
-                    
-                    .mb-5 {{
-                        margin-bottom: 5px;
-                    }}
-                    
-                    @media print {{
-                        body {{ margin: 0; }}
-                        .no-print {{ display: none; }}
-                        @page {{ margin: 0.75in; }}
-                    }}
-                </style>
-            </head>
-            <body>
-                <div class="document-container">
-                    <div class="header">
-                        {f'<img src="{logo_path}" alt="Company Logo" class="company-logo">' if logo_path else ''}
-                        <div class="company-name">{company_name}</div>
-                        <div class="company-address">{company_address}</div>
-                        <div class="company-contact">
-                            Phone: {company_phone} | Email: {company_email} | Website: {company_website}
-                        </div>
-                    </div>
-                    
-                    <div class="document-title">{document.title}</div>
-                    
-                    <div class="employee-header">
-                        <div class="employee-id">Employee ID: {employee_id}</div>
-                        <div class="document-date">Date: {document.generated_at.strftime('%B %d, %Y') if hasattr(document, 'generated_at') and document.generated_at else 'N/A'}</div>
-                    </div>
-                    
-                    <div class="content compact">
-                        {document.content}
-                    </div>
-                    
-                    <div class="footer">
-                        <p>This document was generated on {document.generated_at.strftime('%B %d, %Y at %I:%M %p') if hasattr(document, 'generated_at') and document.generated_at else 'N/A'}</p>
-                        <p>Employee Management System</p>
-                    </div>
-                </div>
-            </body>
-            </html>
-            """
-            
-            return html_content
-            
-        except Exception as e:
-            logger.error(f"Error generating HTML content: {e}")
-            # Return basic HTML as fallback
-            return f"""
-            <!DOCTYPE html>
-            <html>
-            <head>
-                <meta charset="utf-8">
-                <title>{document.title}</title>
-            </head>
-            <body>
-                <h1>{document.title}</h1>
-                <div>{document.content}</div>
-            </body>
-            </html>
-            """
+        """Preserve the designed HTML when downloading an existing document."""
+        content = document.content or ''
+        if content.lstrip().lower().startswith(('<!doctype html', '<html')):
+            return content
+        # Legacy fragment documents must also use the canonical design.
+        data = (document.offer_data or document.increment_data or
+                document.salary_data or {})
+        if isinstance(data, str):
+            import json
+            data = json.loads(data)
+        return DocumentGenerationViewSet().generate_document_content(
+            document.employee, document.document_type, data
+        )
 
     def cleanup_orphaned_files(self, document):
         """Clean up orphaned file references"""
@@ -1112,58 +467,35 @@ class DocumentGenerationViewSet(viewsets.ViewSet):
             return "Mrs." if marital_status in ['married', 'divorced', 'widowed', 'separated'] else "Miss."
         return ""
 
-    def get_offer_letter_template(self):
-        """Professional offer letter template from external file"""
-        import os
-        from django.conf import settings
-        
-        template_path = os.path.join(settings.BASE_DIR, 'core', 'Templates', 'offerlettter.html')
+    TEMPLATE_FILES = {
+        'offer_letter': 'offerlettter.html',
+        'salary_increment': 'salary_increment.html',
+        'salary_slip': 'salary_slip.html',
+        'experience_letter': 'Experience_letter.html',
+        'relieving_letter': 'Releving_letter.html',
+    }
+
+    def get_document_template(self, document_type):
+        """Load the canonical design; missing templates must fail generation."""
         try:
-            with open(template_path, 'r', encoding='utf-8') as file:
-                return file.read()
-        except Exception as e:
-            logger.error(f"Error reading offer letter template: {e}")
-            return "<html><body><h1>Error loading template</h1></body></html>"
-    
+            filename = self.TEMPLATE_FILES[document_type]
+        except KeyError:
+            raise ValueError(f"Unsupported document type: {document_type}") from None
+        return (Path(settings.BASE_DIR) / 'core' / 'Templates' / filename).read_text(
+            encoding='utf-8'
+        )
+
+    def get_offer_letter_template(self):
+        return self.get_document_template('offer_letter')
 
     def get_salary_increment_template(self):
-        """Professional salary increment template from external file"""
-        import os
-        from django.conf import settings
-        
-        template_path = os.path.join(settings.BASE_DIR, 'core', 'Templates', 'salary_increment.html')
-        try:
-            with open(template_path, 'r', encoding='utf-8') as file:
-                return file.read()
-        except Exception as e:
-            logger.error(f"Error reading salary increment template: {e}")
-            return "<html><body><h1>Error loading template</h1></body></html>"
+        return self.get_document_template('salary_increment')
 
     def get_experience_letter_template(self):
-        """Professional experience letter template from external file"""
-        import os
-        from django.conf import settings
-        
-        template_path = os.path.join(settings.BASE_DIR, 'core', 'Templates', 'Experience_letter.html')
-        try:
-            with open(template_path, 'r', encoding='utf-8') as file:
-                return file.read()
-        except Exception as e:
-            logger.error(f"Error reading experience letter template: {e}")
-            return "<html><body><h1>Error loading template</h1></body></html>"
+        return self.get_document_template('experience_letter')
 
     def get_relieving_letter_template(self):
-        """Professional relieving letter template from external file"""
-        import os
-        from django.conf import settings
-        
-        template_path = os.path.join(settings.BASE_DIR, 'core', 'Templates', 'Releving_letter.html')
-        try:
-            with open(template_path, 'r', encoding='utf-8') as file:
-                return file.read()
-        except Exception as e:
-            logger.error(f"Error reading relieving letter template: {e}")
-            return "<html><body><h1>Error loading template</h1></body></html>"
+        return self.get_document_template('relieving_letter')
 
     def format_currency(self, amount):
         """Format currency in Indian format with proper word representation"""
@@ -1215,20 +547,7 @@ class DocumentGenerationViewSet(viewsets.ViewSet):
         return f"{numeric_value:.2f}".rstrip('0').rstrip('.')
 
     def get_salary_slip_template(self):
-        """Professional salary slip template from external file"""
-        import os
-        from django.conf import settings
-        
-        template_path = os.path.join(settings.BASE_DIR, 'core', 'Templates', 'salary_slip.html')
-        try:
-            with open(template_path, 'r', encoding='utf-8') as file:
-                return file.read()
-        except Exception as e:
-            logger.error(f"Error reading salary slip template: {e}")
-            # Fallback to a basic template or raise error
-            return "<html><body><h1>Error loading template</h1></body></html>"
-
-
+        return self.get_document_template('salary_slip')
 
     def number_to_words(self, num):
         """Convert number to words in Indian format"""
@@ -1313,98 +632,76 @@ class DocumentGenerationViewSet(viewsets.ViewSet):
             "", "", "Twenty", "Thirty", "Forty", "Fifty", "Sixty", "Seventy", "Eighty", "Ninety"
         ]
     
-    def get_base64_image(self, url):
-        """Fetch image from URL and return as base64 string"""
-        if not url:
-            return ""
-            
-        with IMAGE_CACHE_LOCK:
-            if url in IMAGE_CACHE:
-                return IMAGE_CACHE[url]
-        
-        try:
-            response = requests.get(url, timeout=10, verify=False)
-            if response.status_code == 200:
-                content_type = response.headers.get('Content-Type', 'image/png')
-                encoded_string = base64.b64encode(response.content).decode('utf-8')
-                base64_data = f"data:{content_type};base64,{encoded_string}"
-                
-                with IMAGE_CACHE_LOCK:
-                    IMAGE_CACHE[url] = base64_data
-                return base64_data
-        except Exception as e:
-            logger.error(f"Error fetching image from {url}: {e}")
-            
-        return url # Fallback to original URL if fetching fails
+    def resolve_asset_data_url(self, *candidate_names):
+        """Embed existing media/static images for both browser and PDF rendering.
+
+        Uploaded assets take precedence. Only paths within configured asset roots
+        are read; no request-controlled URLs or network fetches are needed.
+        """
+        candidate_names = tuple(
+            name for name in candidate_names
+            if name and not Path(name).is_absolute() and '..' not in Path(name).parts
+        )
+        roots = []
+        for root in (getattr(settings, 'MEDIA_ROOT', None),
+                     Path(settings.BASE_DIR) / 'static',
+                     getattr(settings, 'STATIC_ROOT', None)):
+            if root:
+                roots.append(Path(root).resolve())
+
+        paths = []
+        for root in roots:
+            for name in candidate_names:
+                path = (root / name).resolve()
+                if path.is_relative_to(root):
+                    paths.append(path)
+        for name in candidate_names:
+            found = finders.find(name)
+            if found:
+                paths.append(Path(found))
+
+        for path in paths:
+            content_type, _ = mimetypes.guess_type(str(path))
+            if not content_type or not content_type.startswith('image/'):
+                continue
+            try:
+                if path.is_file():
+                    encoded = base64.b64encode(path.read_bytes()).decode('ascii')
+                    return f"data:{content_type};base64,{encoded}"
+            except OSError as exc:
+                logger.warning("Unable to read document image %s: %s", path, exc)
+        logger.warning("Document image not found: %s", candidate_names)
+        return ''
 
     def get_logo_url(self):
-        """Get the company logo URL"""
-        from django.conf import settings
-        import os
-        
-        # Check if logo file exists
-        logo_path = os.path.join(settings.MEDIA_ROOT, 'documents', 'companylogo.png')
-        if os.path.exists(logo_path):
-            # Use production domain
-            domain = "https://dosapi.attendance.dishaonliesolution.workspa.in"
-            # Return absolute URL for the logo
-            logo_url = f"{domain}{settings.MEDIA_URL}documents/companylogo.png"
-        else:
-            # Return a placeholder logo
-            logo_url = "https://res.cloudinary.com/dm2bxj0gx/image/upload/v1773744100/dos_logo_me8lqb.png"
-            
-        return self.get_base64_image(logo_url)
-    
+        return self.resolve_asset_data_url('documents/companylogo.png', 'companylogo.png')
+
     def get_common_images(self, document_type=None):
-        """Get base64 encoded common images like logo, stamp, and signature in parallel"""
-        # Determine URLs to fetch
-        urls = {
-            'logo': "https://res.cloudinary.com/dm2bxj0gx/image/upload/v1773744100/dos_logo_me8lqb.png", # Default
-            'signature': "https://res.cloudinary.com/dm2bxj0gx/image/upload/v1777727241/Shailesh_Logo_cltial.png",
+        """Supply the aliases used by the existing designs from the same assets."""
+        logo = self.get_logo_url()
+        signature = self.resolve_asset_data_url('documents/signature.png', 'signature.png')
+        stamp = self.resolve_asset_data_url(
+            'documents/company_stamp.png', 'documents/stamp.png',
+            'company_stamp.png', 'stamp.png',
+        )
+        return {
+            'logo': logo, 'logo_url': logo, 'company_logo_url': logo,
+            'signature': signature, 'signature_url': signature,
+            'stamp': stamp, 'stamp_url': stamp,
         }
-        
-        if document_type == 'offer_letter':
-            urls['stamp'] = "https://res.cloudinary.com/dm2bxj0gx/image/upload/v1769696236/disha_stamp_j2liis.png"
-        else:
-            urls['stamp'] = "https://res.cloudinary.com/dm2bxj0gx/image/upload/v1769696174/2_niwh6i.png"
-
-        # Check for local logo which is preferred
-        try:
-            from django.conf import settings
-            import os
-            logo_path = os.path.join(settings.MEDIA_ROOT, 'documents', 'companylogo.png')
-            if os.path.exists(logo_path):
-                domain = "https://dosapi.attendance.dishaonliesolution.workspa.in"
-                urls['logo'] = f"{domain}{settings.MEDIA_URL}documents/companylogo.png"
-        except:
-            pass
-
-        # Use a list to maintain order and results
-        images = {}
-        with ThreadPoolExecutor(max_workers=3) as executor:
-            # Create a map of future to key
-            future_to_key = {executor.submit(self.get_base64_image, url): key for key, url in urls.items()}
-            for future in future_to_key:
-                key = future_to_key[future]
-                try:
-                    images[key] = future.result()
-                except Exception as e:
-                    logger.error(f"Error fetching image for {key}: {e}")
-                    images[key] = urls[key] # Fallback to original URL
-                    
-        return images
 
     def generate_document_content(self, employee, document_type, data):
-        """Generate document content using template"""
+        """Generate document content using the canonical design and context."""
+        template_content = self.get_document_template(document_type)
         
         if document_type == 'offer_letter':
-            template_content = self.get_offer_letter_template()
             
             # Format start date
             start_date_str = data.get('start_date', '')
             if start_date_str:
                 try:
-                    start_date_obj = parse_date(start_date_str)
+                    start_date_obj = (parse_date(start_date_str)
+                                      if isinstance(start_date_str, str) else start_date_str)
                     if start_date_obj:
                         start_date_formatted = start_date_obj.strftime('%d-%m-%Y')
                     else:
@@ -1426,13 +723,11 @@ class DocumentGenerationViewSet(viewsets.ViewSet):
                 'salary': self.format_currency(data.get('starting_salary') or data.get('salary')),
                 'offer_date': start_date_formatted,
                 'current_date': datetime.now().strftime('%A, %d %B %Y'),
-                'logo_url': self.get_logo_url(),
-                'company_name': 'Disha Online Solutions',
+                'company_name': 'Disha Online Solution',
                 'manager_title': 'Manager',
             }
             
         elif document_type == 'salary_increment':
-            template_content = self.get_salary_increment_template()
             
             # Try to get increment record for auto-fetching data
             increment_record = None
@@ -1503,11 +798,9 @@ class DocumentGenerationViewSet(viewsets.ViewSet):
                 'increment_amount': self.format_currency(increment_amount),
                 'increment_percentage': f"{increment_percentage:.0f}%",
                 'effective_date': effective_date_formatted,
-                'logo_url': self.get_logo_url(),
             }
         
         elif document_type == 'salary_slip':
-            template_content = self.get_salary_slip_template()
             
             # Check if salary_id is provided for auto-fetching from DB
             salary_id = data.get('salary_id')
@@ -1706,13 +999,11 @@ class DocumentGenerationViewSet(viewsets.ViewSet):
                 'present_days': self.format_day_count(present_days),
                 'absent_days': self.format_day_count(absent_days),
                 'display_absent_days': self.format_day_count(display_absent_days),
-                'logo_url': self.get_logo_url(),
                 'current_date': datetime.now().strftime('%d/%m/%Y'),
                 'joining_date': (emp if salary_record else employee).joining_date.strftime('%d-%m-%Y') if (emp if salary_record else employee).joining_date else None,
             }
         
         elif document_type == 'experience_letter':
-            template_content = self.get_experience_letter_template()
             
             # Format joining date
             joining_date_formatted = employee.joining_date.strftime('%d-%m-%Y') if employee.joining_date else 'Not specified'
@@ -1751,11 +1042,9 @@ class DocumentGenerationViewSet(viewsets.ViewSet):
                 'office_name': employee.office.name if employee.office else 'Disha Online Solution',
                 'company_name': 'Disha Online Solution',
                 'created_date': datetime.now().strftime('%d-%m-%Y'),
-                'logo_url': self.get_logo_url(),
             }
             
         elif document_type == 'relieving_letter':
-            template_content = self.get_relieving_letter_template()
             
             # Format joining date
             joining_date_formatted = employee.joining_date.strftime('%d-%m-%Y') if employee.joining_date else 'Not specified'
@@ -1812,15 +1101,15 @@ class DocumentGenerationViewSet(viewsets.ViewSet):
                 'last_working_day': lwd_formatted,
                 'resignation_date': rd_formatted,
                 'date': datetime.now().strftime('%d-%m-%Y'),
-                'logo_url': self.get_logo_url(),
             }
             
         else:
             raise ValueError(f"Unsupported document type: {document_type}")
         
-        # Add common images (logo, signatures, stamps) as base64 to ensure they load in PDFs
-        context.update(self.get_common_images(document_type))
-            
+        # Add common images (logo, signatures, stamps) as base64 so PDF templates can render reliably.
+        common_images = self.get_common_images(document_type)
+        context.update(common_images)
+
         # Render template
         template = Template(template_content)
         rendered_content = template.render(Context(context))
@@ -1961,18 +1250,8 @@ class DocumentGenerationViewSet(viewsets.ViewSet):
             ).first()
             
             if not template:
-                # Create a default template if none exists
-                if document_type == 'offer_letter':
-                    template_content = self.get_offer_letter_template()
-                elif document_type == 'salary_increment':
-                    template_content = self.get_salary_increment_template()
-                elif document_type == 'experience_letter':
-                    template_content = self.get_experience_letter_template()
-                elif document_type == 'relieving_letter':
-                    template_content = self.get_relieving_letter_template()
-                else:
-                    template_content = "<html><body><h1>Document</h1></body></html>"
-                
+                template_content = self.get_document_template(document_type)
+
                 template = DocumentTemplate.objects.create(
                     name=f"Default {document_type.replace('_', ' ').title()}",
                     document_type=document_type,
